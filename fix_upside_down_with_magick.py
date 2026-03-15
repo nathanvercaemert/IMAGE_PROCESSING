@@ -20,6 +20,7 @@ Requires: ImageMagick (magick) on PATH
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 
@@ -52,6 +53,20 @@ def run(cmd: list[str], description: str) -> None:
         raise RuntimeError(
             f"Command failed with exit code {result.returncode}: {' '.join(cmd)}"
         )
+
+
+def get_bit_depth(image_path: str) -> str:
+    """Return the bit depth of *image_path* via ImageMagick identify."""
+    result = subprocess.run(
+        ["magick", "identify", "-format", "%z", image_path],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Could not determine bit depth for {image_path}: "
+            f"{result.stderr.strip()}"
+        )
+    return result.stdout.strip()
 
 
 def build_orientation_path(image_path: str, image_root: str, data_root: str) -> str:
@@ -133,9 +148,10 @@ def main() -> None:
             orientation = read_orientation(orientation_path)
 
             if orientation == 180:
+                depth = get_bit_depth(image_path)
                 run(
-                    ["magick", image_path, "-rotate", "180", rot_path],
-                    f"Rotating 180 -> '{os.path.basename(rot_path)}'",
+                    ["magick", image_path, "-depth", depth, "-rotate", "180", rot_path],
+                    f"Rotating 180 (depth={depth}) -> '{os.path.basename(rot_path)}'",
                 )
                 os.remove(image_path)
                 action = "rotated 180, removed original"
