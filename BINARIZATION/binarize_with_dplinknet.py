@@ -26,16 +26,16 @@ Usage:
 
 Requires (Python >= 3.9):
     pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-    pip install "opencv-python>=4.5" "numpy>=1.22"
+    pip install "opencv-python>=4.5" "numpy>=1.22" pyvips
 """
 
 import argparse
-import math
 import os
 import sys
 
 import cv2
 import numpy as np
+import pyvips
 import torch
 
 from networks import MODEL_REGISTRY
@@ -129,7 +129,7 @@ def read_image_bgr8(path: str) -> np.ndarray:
         raise RuntimeError(f"Could not read image: {path}")
 
     if img.dtype == np.uint16:
-        img = (img >> 8).astype(np.uint8)
+        img = (img / 257).astype(np.uint8)
 
     if img.ndim == 2:
         img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
@@ -192,6 +192,26 @@ def predict_tile_tta(model: torch.nn.Module, tile: np.ndarray) -> np.ndarray:
     return total
 
 
+def read_dpi(path: str) -> float:
+    """Read the horizontal resolution from an image file via pyvips."""
+    img = pyvips.Image.new_from_file(path, access="sequential")
+    return img.get("Xres")
+
+
+def save_bilevel_tiff(
+    mask: np.ndarray, output_path: str, xres: float,
+) -> None:
+    """Save a 0/255 mask as an uncompressed 1-bit TIFF with DPI preserved."""
+    h, w = mask.shape
+    vimg = pyvips.Image.new_from_memory(mask.data, w, h, 1, "uchar")
+    vimg = vimg.copy(xres=xres, yres=xres)
+    vimg.write_to_file(
+        output_path,
+        compression="none",
+        bitdepth=1,
+    )
+
+
 def binarize_image(
     image_path: str,
     output_path: str,
@@ -202,6 +222,7 @@ def binarize_image(
     """Read an image, tile it, run inference, stitch, threshold, and save."""
     print(f"\n>> Binarizing '{image_path}'")
 
+    xres = read_dpi(image_path)
     img = read_image_bgr8(image_path)
     h, w = img.shape[:2]
     stride = TILE_SIZE - 2 * PADDING_SIZE
@@ -248,7 +269,7 @@ def binarize_image(
     mask = (output > threshold).astype(np.uint8) * 255
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    cv2.imwrite(output_path, mask)
+    save_bilevel_tiff(mask, output_path, xres)
     print(f"   Saved '{output_path}'")
 
 
