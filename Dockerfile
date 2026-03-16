@@ -48,6 +48,8 @@ RUN pip3 install --no-cache-dir --break-system-packages \
         paddlepaddle==3.2.2 \
         paddleocr
 
+RUN python -c "from paddleocr import TextDetection; TextDetection(device='cpu')"
+
 # ── Application repository ───────────────────────────────────────────
 RUN git clone --depth 1 https://github.com/nathanvercaemert/IMAGE_PROCESSING.git /opt/image_processing
 

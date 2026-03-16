@@ -124,8 +124,6 @@ def detect_boxes(detector: TextDetection, image_path: str) -> list[dict]:
 
 
 def main() -> None:
-    _configure_logging()
-
     parser = argparse.ArgumentParser(
         description="Detect text bounding boxes for SKEW-prefixed TIFF images "
                     "using PaddleOCR.  Writes JSON bounding box files to "
@@ -165,6 +163,8 @@ def main() -> None:
         det_kwargs["model_dir"] = args.det_model_dir
 
     detector = TextDetection(**det_kwargs)
+
+    _configure_logging()
 
     total = len(images)
     failed: list[tuple[str, str]] = []
