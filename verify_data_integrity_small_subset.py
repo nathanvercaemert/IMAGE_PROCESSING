@@ -24,10 +24,27 @@ Requires: ImageMagick (magick) on PATH
 
 import argparse
 import json
+import logging
 import os
 import re
 import subprocess
 import sys
+
+logger = logging.getLogger("verify_data_integrity_small_subset")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp",
@@ -304,29 +321,40 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    _configure_logging()
+
     if not os.path.isdir(args.raw_dir):
-        sys.exit(f"ERROR: raw directory not found: {args.raw_dir}")
+        logger.error("raw directory not found: %s", args.raw_dir)
+        sys.exit(1)
     if not os.path.isdir(args.working_dir):
-        sys.exit(f"ERROR: working directory not found: {args.working_dir}")
+        logger.error("working directory not found: %s", args.working_dir)
+        sys.exit(1)
 
     raw_images = collect_images(args.raw_dir)
     if not raw_images:
-        sys.exit(f"ERROR: no image files found in {args.raw_dir}")
+        logger.error("no image files found in %s", args.raw_dir)
+        sys.exit(1)
 
     raw_images = [p for p in raw_images if os.path.basename(p).startswith("RAW")]
     if not raw_images:
-        sys.exit(f"ERROR: no RAW-prefixed images found in {args.raw_dir}")
+        logger.error("no RAW-prefixed images found in %s", args.raw_dir)
+        sys.exit(1)
 
     total = len(raw_images)
     missing: list[str] = []
     mismatches: list[tuple[str, list[str]]] = []
     ok_count = 0
 
-    print(f"Comparing {total} RAW image(s) against {args.working_prefix}-prefixed working images")
-    print(f"  RAW dir:     {args.raw_dir}")
-    print(f"  Working dir: {args.working_dir}")
-    print(f"  Pixel sample: 3 x {SAMPLE_SIZE}x{SAMPLE_SIZE} regions (top-left, center, bottom-right)")
-    print()
+    logger.info(
+        "Comparing %d RAW image(s) against %s-prefixed working images",
+        total, args.working_prefix,
+    )
+    logger.info("RAW dir: %s", args.raw_dir)
+    logger.info("Working dir: %s", args.working_dir)
+    logger.info(
+        "Pixel sample: 3 x %dx%d regions (top-left, center, bottom-right)",
+        SAMPLE_SIZE, SAMPLE_SIZE,
+    )
 
     for idx, raw_path in enumerate(raw_images, 1):
         rel = os.path.relpath(raw_path, args.raw_dir)
@@ -334,10 +362,10 @@ def main() -> None:
             raw_path, args.raw_dir, args.working_dir, args.working_prefix
         )
 
-        print(f"[{idx}/{total}] {rel}")
+        logger.info("[%d/%d] %s", idx, total, rel)
 
         if working_path is None:
-            print(f"  MISSING: no matching {args.working_prefix} file found\n")
+            logger.info("[%d/%d] %s -- MISSING: no matching %s file", idx, total, rel, args.working_prefix)
             missing.append(rel)
             continue
 
@@ -345,7 +373,7 @@ def main() -> None:
             raw_info = identify_image(raw_path)
             work_info = identify_image(working_path)
         except RuntimeError as e:
-            print(f"  ERROR: {e}\n")
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             mismatches.append((rel, [str(e)]))
             continue
 
@@ -354,7 +382,7 @@ def main() -> None:
             raw_channels = count_channels_from_pixels(raw_path)
             work_channels = count_channels_from_pixels(working_path)
         except RuntimeError as e:
-            print(f"  ERROR counting channels: {e}\n")
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             mismatches.append((rel, [str(e)]))
             continue
 
@@ -401,12 +429,12 @@ def main() -> None:
             raw_depth = work_depth = None
 
         if raw_depth and work_depth:
-            print(f"  RAW  pixel depth: {raw_depth['verdict']}")
+            logger.info("[%d/%d] %s -- RAW pixel depth: %s", idx, total, rel, raw_depth["verdict"])
             for rs in raw_depth["regions"]:
-                print(f"    {rs}")
-            print(f"  {args.working_prefix:4s} pixel depth: {work_depth['verdict']}")
+                logger.debug("[%d/%d] %s -- RAW region: %s", idx, total, rel, rs)
+            logger.info("[%d/%d] %s -- %s pixel depth: %s", idx, total, rel, args.working_prefix, work_depth["verdict"])
             for rs in work_depth["regions"]:
-                print(f"    {rs}")
+                logger.debug("[%d/%d] %s -- %s region: %s", idx, total, rel, args.working_prefix, rs)
 
             # Header depth mismatch
             if raw_info["depth"] != work_info["depth"]:
@@ -440,45 +468,44 @@ def main() -> None:
         if problems:
             mismatches.append((rel, problems))
             for p in problems:
-                print(f"  MISMATCH: {p}")
+                logger.info("[%d/%d] %s -- MISMATCH: %s", idx, total, rel, p)
         else:
             ok_count += 1
             actual = raw_depth["actual_depth"] if raw_depth else raw_info["depth"]
             total_bits = actual * raw_channels
-            print(
-                f"  OK  actual_depth={actual}bit/ch ({total_bits}bit total)  "
-                f"channels={raw_channels}  "
-                f"dpi={raw_info['xres']:.0f}x{raw_info['yres']:.0f}  "
-                f"RAW={format_size(raw_info['file_size'])}  "
-                f"{args.working_prefix}={format_size(work_info['file_size'])}"
+            logger.info(
+                "[%d/%d] %s -- OK actual_depth=%dbit/ch (%dbit total) "
+                "channels=%d dpi=%.0fx%.0f RAW=%s %s=%s",
+                idx, total, rel, actual, total_bits, raw_channels,
+                raw_info["xres"], raw_info["yres"],
+                format_size(raw_info["file_size"]),
+                args.working_prefix, format_size(work_info["file_size"]),
             )
 
-        print()
-
     # --- Summary ---
-    print("=" * 70)
-    print(f"RESULTS: {ok_count}/{total} OK, "
-          f"{len(mismatches)} mismatched, {len(missing)} missing")
+    logger.info(
+        "RESULTS: %d/%d OK, %d mismatched, %d missing",
+        ok_count, total, len(mismatches), len(missing),
+    )
 
     if missing:
-        print(f"\nMISSING ({len(missing)}):")
+        logger.info("MISSING (%d):", len(missing))
         for name in missing:
-            print(f"  - {name}")
+            logger.info("  - %s", name)
 
     if mismatches:
-        print(f"\nMISMATCHES ({len(mismatches)}):")
+        logger.info("MISMATCHES (%d):", len(mismatches))
         for name, problems in mismatches:
-            print(f"  - {name}:")
+            logger.info("  - %s:", name)
             for p in problems:
-                print(f"      {p}")
-        print()
-        print("NOTE ON 8-BIT vs 16-BIT:")
-        print("  If pixel data is '8-bit in a 16-bit container', every channel")
-        print("  value is a multiple of 257 (e.g. 0, 257, 514, ... 65535).")
-        print("  This means the file stores 16-bit values but carries only 8-bit")
-        print("  worth of actual color information (256 levels, not 65536).")
-        print("  IrfanView showing '24-bit' = 8 bits x 3 channels = 24 total.")
-        print("  True 48-bit = 16 bits x 3 channels with values NOT on 257 boundaries.")
+                logger.info("      %s", p)
+        logger.info("NOTE ON 8-BIT vs 16-BIT:")
+        logger.info("If pixel data is '8-bit in a 16-bit container', every channel")
+        logger.info("value is a multiple of 257 (e.g. 0, 257, 514, ... 65535).")
+        logger.info("This means the file stores 16-bit values but carries only 8-bit")
+        logger.info("worth of actual color information (256 levels, not 65536).")
+        logger.info("IrfanView showing '24-bit' = 8 bits x 3 channels = 24 total.")
+        logger.info("True 48-bit = 16 bits x 3 channels with values NOT on 257 boundaries.")
 
     if mismatches or missing:
         sys.exit(1)

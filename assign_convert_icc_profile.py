@@ -10,21 +10,36 @@ Requires: exiftool, ImageMagick (magick) on PATH
 """
 
 import argparse
+import logging
 import os
 import subprocess
 import sys
 import tempfile
 
+logger = logging.getLogger("assign_convert_icc_profile")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 def run(cmd: list[str], description: str) -> None:
-    """Run a command, printing what it does and aborting on failure."""
-    print(f"\n>> {description}")
-    print(f"   $ {' '.join(cmd)}")
+    """Run a command, logging what it does and aborting on failure."""
+    logger.debug("%s -- $ %s", description, " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.stdout:
-        print(result.stdout.rstrip())
+        logger.debug("%s", result.stdout.rstrip())
     if result.stderr:
-        print(result.stderr.rstrip(), file=sys.stderr)
+        logger.debug("%s", result.stderr.rstrip())
     if result.returncode != 0:
         raise RuntimeError(
             f"Command failed with exit code {result.returncode}: {' '.join(cmd)}"
@@ -102,12 +117,15 @@ def main() -> None:
                         help="Working-space ICC profile to convert to")
     args = parser.parse_args()
 
+    _configure_logging()
+
     try:
         assign_convert_icc(args.input, args.output, args.scanner, args.working)
     except (RuntimeError, FileNotFoundError) as e:
-        sys.exit(f"ERROR: {e}")
+        logger.error("%s", e)
+        sys.exit(1)
 
-    print("\nDone.")
+    logger.info("Done.")
 
 
 if __name__ == "__main__":

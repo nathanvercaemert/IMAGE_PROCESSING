@@ -21,10 +21,27 @@ Requires: pyvips (with libvips) installed
 """
 
 import argparse
+import logging
 import os
 import sys
 
 import pyvips
+
+logger = logging.getLogger("crop_compound_bounding_boxes")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp",
@@ -47,9 +64,8 @@ def verify_bound_prefix(images: list[str]) -> None:
     for image_path in images:
         filename = os.path.basename(image_path)
         if not filename.startswith("BOUND"):
-            sys.exit(
-                f"ERROR: filename does not start with 'BOUND': {image_path}"
-            )
+            logger.error("filename does not start with 'BOUND': %s", image_path)
+            sys.exit(1)
 
 
 def build_compound_data_path(
@@ -104,7 +120,7 @@ def crop_image(
     left: int, top: int, width: int, height: int,
 ) -> None:
     """Crop *image_path* to the given region and save to *output_path*."""
-    print(f"\n>> Cropping '{image_path}' to {left},{top} {width}x{height}")
+    logger.debug("Cropping '%s' to %d,%d %dx%d", image_path, left, top, width, height)
 
     image = pyvips.Image.new_from_file(image_path, access="sequential")
 
@@ -115,10 +131,12 @@ def crop_image(
     cropped = cropped.copy(xres=xres, yres=yres)
 
     cropped.write_to_file(output_path)
-    print(f"   Saved '{output_path}'")
+    logger.debug("Saved '%s'", output_path)
 
 
 def main() -> None:
+    _configure_logging()
+
     parser = argparse.ArgumentParser(
         description="Crop BOUND-prefixed images to their compound bounding "
                     "box using pyvips and saved compound data files.  "
@@ -129,22 +147,25 @@ def main() -> None:
     args = parser.parse_args()
 
     if not os.path.isdir(args.image_dir):
-        sys.exit(f"ERROR: image directory not found: {args.image_dir}")
+        logger.error("image directory not found: %s", args.image_dir)
+        sys.exit(1)
 
     if not os.path.isdir(args.data_dir):
-        sys.exit(f"ERROR: data directory not found: {args.data_dir}")
+        logger.error("data directory not found: %s", args.data_dir)
+        sys.exit(1)
 
     images = collect_images(args.image_dir)
     if not images:
-        sys.exit(f"ERROR: no image files found in {args.image_dir}")
+        logger.error("no image files found in %s", args.image_dir)
+        sys.exit(1)
 
     verify_bound_prefix(images)
 
     total = len(images)
     failed: list[tuple[str, str]] = []
 
-    print(f"Found {total} image(s) under '{args.image_dir}'")
-    print(f"Processing in place (BOUND -> CROP)\n")
+    logger.info("Found %d image(s) under '%s'", total, args.image_dir)
+    logger.info("Processing in place (BOUND -> CROP)")
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
@@ -153,7 +174,6 @@ def main() -> None:
         )
         crop_path = build_crop_path(image_path)
 
-        print(f"--- [{idx}/{total}] {rel} ---")
         try:
             if not os.path.isfile(compound_data_path):
                 os.rename(image_path, crop_path)
@@ -164,18 +184,17 @@ def main() -> None:
                 os.remove(image_path)
                 action = f"cropped to {left},{top} {width}x{height}"
         except (RuntimeError, FileNotFoundError, ValueError, OSError) as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             failed.append((rel, str(e)))
             continue
 
-        print(f"    OK ({action})\n")
+        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.error("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.error("  - %s: %s", name, err)
         sys.exit(1)
 
 

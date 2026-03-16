@@ -11,10 +11,27 @@ Requires: tesseract (with osd.traineddata) on PATH
 """
 
 import argparse
+import logging
 import os
 import re
 import subprocess
 import sys
+
+logger = logging.getLogger("detect_orientation_with_tesseract_osd")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp",
@@ -37,8 +54,7 @@ def collect_images(directory: str) -> list[str]:
 def detect_orientation(image_path: str) -> int:
     """Run Tesseract OSD on *image_path* and return 0 or 180."""
     cmd = ["tesseract", image_path, "-", "--psm", "0", "-l", "osd"]
-    print(f"\n>> Detecting orientation on '{image_path}'")
-    print(f"   $ {' '.join(cmd)}")
+    logger.debug("Detecting orientation on '%s' -- $ %s", image_path, " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     combined_output = f"{result.stdout}\n{result.stderr}"
@@ -75,44 +91,46 @@ def main() -> None:
     parser.add_argument("data_dir", help="Directory to store orientation files")
     args = parser.parse_args()
 
+    _configure_logging()
+
     if not os.path.isdir(args.image_dir):
-        sys.exit(f"ERROR: image directory not found: {args.image_dir}")
+        logger.error("image directory not found: %s", args.image_dir)
+        sys.exit(1)
 
     images = collect_images(args.image_dir)
     if not images:
-        sys.exit(f"ERROR: no image files found in {args.image_dir}")
+        logger.error("no image files found in %s", args.image_dir)
+        sys.exit(1)
 
     os.makedirs(args.data_dir, exist_ok=True)
 
     total = len(images)
     failed: list[tuple[str, str]] = []
 
-    print(f"Found {total} image(s) under '{args.image_dir}'")
-    print(f"Data directory: '{args.data_dir}'\n")
+    logger.info("Found %d image(s) under '%s'", total, args.image_dir)
+    logger.info("Data directory: '%s'", args.data_dir)
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
         out_path = build_output_path(image_path, args.image_dir, args.data_dir)
 
-        print(f"--- [{idx}/{total}] {rel} ---")
         try:
             orientation = detect_orientation(image_path)
         except RuntimeError as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             failed.append((rel, str(e)))
             continue
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(f"{orientation}\n")
-        print(f"    OK ({orientation})\n")
+        logger.info("[%d/%d] %s -- OK (%d)", idx, total, rel, orientation)
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.error("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.error("  %s: %s", name, err)
         sys.exit(1)
 
 

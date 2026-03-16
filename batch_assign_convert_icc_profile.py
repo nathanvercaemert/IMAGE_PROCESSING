@@ -10,10 +10,27 @@ Requires: exiftool, ImageMagick (magick) on PATH
 """
 
 import argparse
+import logging
 import os
 import sys
 
 from assign_convert_icc_profile import assign_convert_icc
+
+logger = logging.getLogger("batch_assign_convert_icc_profile")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 # Extensions recognised as images to process (case-insensitive)
 IMAGE_EXTENSIONS = {
@@ -43,41 +60,43 @@ def main() -> None:
                         help="Working-space ICC profile to convert to")
     args = parser.parse_args()
 
+    _configure_logging()
+
     if not os.path.isdir(args.input_dir):
-        sys.exit(f"ERROR: input directory not found: {args.input_dir}")
+        logger.error("input directory not found: %s", args.input_dir)
+        sys.exit(1)
 
     os.makedirs(args.output_dir, exist_ok=True)
 
     images = collect_images(args.input_dir)
     if not images:
-        sys.exit(f"ERROR: no image files found in {args.input_dir}")
+        logger.error("no image files found in %s", args.input_dir)
+        sys.exit(1)
 
     total = len(images)
     failed: list[tuple[str, str]] = []
 
-    print(f"Found {total} image(s) in '{args.input_dir}'")
-    print(f"Output directory: '{args.output_dir}'\n")
+    logger.info("Found %d image(s) in '%s'", total, args.input_dir)
+    logger.info("Output directory: '%s'", args.output_dir)
 
     for idx, input_path in enumerate(images, 1):
         filename = os.path.basename(input_path)
         output_path = os.path.join(args.output_dir, filename)
 
-        print(f"--- [{idx}/{total}] {filename} ---")
         try:
             assign_convert_icc(
                 input_path, output_path, args.scanner, args.working
             )
-            print(f"    OK\n")
+            logger.info("[%d/%d] %s -- OK", idx, total, filename)
         except (RuntimeError, FileNotFoundError) as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, filename, e)
             failed.append((filename, str(e)))
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.error("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.error("  %s: %s", name, err)
         sys.exit(1)
 
 

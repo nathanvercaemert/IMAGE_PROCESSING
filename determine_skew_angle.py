@@ -14,9 +14,26 @@ Requires: lept_skew on PATH
 
 import argparse
 import json
+import logging
 import os
 import subprocess
 import sys
+
+logger = logging.getLogger("determine_skew_angle")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp",
@@ -37,11 +54,10 @@ def collect_images(directory: str) -> list[str]:
 def detect_skew(image_path: str) -> tuple[float, float]:
     """Run lept_skew on *image_path* and return (angle, confidence)."""
     cmd = ["lept_skew", image_path]
-    print(f"\n>> Detecting skew on '{image_path}'")
-    print(f"   $ {' '.join(cmd)}")
+    logger.debug("Detecting skew on '%s' -- $ %s", image_path, " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.stderr:
-        print(result.stderr.rstrip(), file=sys.stderr)
+        logger.debug("%s", result.stderr.rstrip())
     if result.returncode != 0:
         raise RuntimeError(
             f"Command failed with exit code {result.returncode}: {' '.join(cmd)}"
@@ -71,12 +87,13 @@ def verify_rot_prefix(images: list[str]) -> None:
     for image_path in images:
         filename = os.path.basename(image_path)
         if not filename.startswith("ROT"):
-            sys.exit(
-                f"ERROR: filename does not start with 'ROT': {image_path}"
-            )
+            logger.error("filename does not start with 'ROT': %s", image_path)
+            sys.exit(1)
 
 
 def main() -> None:
+    _configure_logging()
+
     parser = argparse.ArgumentParser(
         description="Determine skew angle for ROT-prefixed images using leptonica."
     )
@@ -85,11 +102,13 @@ def main() -> None:
     args = parser.parse_args()
 
     if not os.path.isdir(args.image_dir):
-        sys.exit(f"ERROR: image directory not found: {args.image_dir}")
+        logger.error("image directory not found: %s", args.image_dir)
+        sys.exit(1)
 
     images = collect_images(args.image_dir)
     if not images:
-        sys.exit(f"ERROR: no image files found in {args.image_dir}")
+        logger.error("no image files found in %s", args.image_dir)
+        sys.exit(1)
 
     verify_rot_prefix(images)
 
@@ -98,32 +117,30 @@ def main() -> None:
     total = len(images)
     failed: list[tuple[str, str]] = []
 
-    print(f"Found {total} image(s) under '{args.image_dir}'")
-    print(f"Data directory: '{args.data_dir}'\n")
+    logger.info("Found %d image(s) under '%s'", total, args.image_dir)
+    logger.info("Data directory: '%s'", args.data_dir)
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
         out_path = build_output_path(image_path, args.image_dir, args.data_dir)
 
-        print(f"--- [{idx}/{total}] {rel} ---")
         try:
             angle, confidence = detect_skew(image_path)
         except RuntimeError as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             failed.append((rel, str(e)))
             continue
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(f"{angle}\n{confidence}\n")
-        print(f"    OK (angle={angle}, confidence={confidence})\n")
+        logger.info("[%d/%d] %s -- OK (angle=%.4f, confidence=%.4f)", idx, total, rel, angle, confidence)
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.error("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.error("  - %s: %s", name, err)
         sys.exit(1)
 
 

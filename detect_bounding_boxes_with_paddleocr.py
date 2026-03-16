@@ -15,6 +15,7 @@ Requires: paddleocr (pip install paddleocr), paddlepaddle==3.2.2, pyvips
 
 import argparse
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -22,6 +23,22 @@ import tempfile
 import numpy as np
 import pyvips
 from paddleocr import TextDetection
+
+logger = logging.getLogger("detect_bounding_boxes_with_paddleocr")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 TIFF_EXTENSIONS = {".tif", ".tiff"}
 
@@ -42,9 +59,8 @@ def verify_skew_prefix(images: list[str]) -> None:
     for image_path in images:
         filename = os.path.basename(image_path)
         if not filename.startswith("SKEW"):
-            sys.exit(
-                f"ERROR: filename does not start with 'SKEW': {image_path}"
-            )
+            logger.error("filename does not start with 'SKEW': %s", image_path)
+            sys.exit(1)
 
 
 def build_output_path(image_path: str, image_root: str, data_root: str) -> str:
@@ -76,7 +92,7 @@ def to_temp_jpg(image_path: str) -> str:
 
 def detect_boxes(detector: TextDetection, image_path: str) -> list[dict]:
     """Run PaddleOCR detection on *image_path* and return bounding boxes."""
-    print(f"\n>> Detecting bounding boxes on '{image_path}'")
+    logger.debug("Detecting bounding boxes on '%s'", image_path)
 
     ext = os.path.splitext(image_path)[1].lower()
     tmp_path = None
@@ -108,6 +124,8 @@ def detect_boxes(detector: TextDetection, image_path: str) -> list[dict]:
 
 
 def main() -> None:
+    _configure_logging()
+
     parser = argparse.ArgumentParser(
         description="Detect text bounding boxes for SKEW-prefixed TIFF images "
                     "using PaddleOCR.  Writes JSON bounding box files to "
@@ -126,11 +144,13 @@ def main() -> None:
     args = parser.parse_args()
 
     if not os.path.isdir(args.image_dir):
-        sys.exit(f"ERROR: image directory not found: {args.image_dir}")
+        logger.error("image directory not found: %s", args.image_dir)
+        sys.exit(1)
 
     images = collect_images(args.image_dir)
     if not images:
-        sys.exit(f"ERROR: no TIFF files found in {args.image_dir}")
+        logger.error("no TIFF files found in %s", args.image_dir)
+        sys.exit(1)
 
     verify_skew_prefix(images)
 
@@ -149,32 +169,30 @@ def main() -> None:
     total = len(images)
     failed: list[tuple[str, str]] = []
 
-    print(f"Found {total} TIFF image(s) under '{args.image_dir}'")
-    print(f"Data directory: '{args.data_dir}'\n")
+    logger.info("Found %d TIFF image(s) under '%s'", total, args.image_dir)
+    logger.info("Data directory: '%s'", args.data_dir)
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
         out_path = build_output_path(image_path, args.image_dir, args.data_dir)
 
-        print(f"--- [{idx}/{total}] {rel} ---")
         try:
             boxes = detect_boxes(detector, image_path)
         except Exception as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             failed.append((rel, str(e)))
             continue
 
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(boxes, f, indent=2)
-        print(f"    OK ({len(boxes)} box(es))\n")
+        logger.info("[%d/%d] %s -- OK (%d box(es))", idx, total, rel, len(boxes))
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.error("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.error("  - %s: %s", name, err)
         sys.exit(1)
 
 

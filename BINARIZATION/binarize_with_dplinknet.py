@@ -30,6 +30,7 @@ Requires (Python >= 3.9):
 """
 
 import argparse
+import logging
 import os
 import sys
 
@@ -39,6 +40,22 @@ import pyvips
 import torch
 
 from networks import MODEL_REGISTRY
+
+logger = logging.getLogger("binarize_with_dplinknet")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp",
@@ -67,9 +84,8 @@ def verify_crop_prefix(images: list[str]) -> None:
     for image_path in images:
         filename = os.path.basename(image_path)
         if not filename.startswith("CROP"):
-            sys.exit(
-                f"ERROR: filename does not start with 'CROP': {image_path}"
-            )
+            logger.error("filename does not start with 'CROP': %s", image_path)
+            sys.exit(1)
 
 
 def build_binary_path(
@@ -87,10 +103,11 @@ def build_binary_path(
 def load_model(weights_path: str, model_name: str) -> torch.nn.Module:
     """Instantiate the model, load weights on CPU, and set to eval mode."""
     if model_name not in MODEL_REGISTRY:
-        sys.exit(
-            f"ERROR: unknown model '{model_name}'. "
-            f"Choose from: {', '.join(sorted(MODEL_REGISTRY.keys()))}"
+        logger.error(
+            "unknown model '%s'. Choose from: %s",
+            model_name, ", ".join(sorted(MODEL_REGISTRY.keys())),
         )
+        sys.exit(1)
 
     model = MODEL_REGISTRY[model_name]()
 
@@ -109,12 +126,11 @@ def load_model(weights_path: str, model_name: str) -> torch.nn.Module:
     try:
         model.load_state_dict(state_dict, strict=True)
     except RuntimeError as e:
-        print(
-            f"ERROR: weight loading failed.  This usually means the "
-            f"checkpoint was saved from a different architecture than "
-            f"'{model_name}'.  Check --model and verify that the layer "
-            f"names in BINARIZATION/networks.py match the checkpoint.\n",
-            file=sys.stderr,
+        logger.error(
+            "weight loading failed. This usually means the checkpoint was "
+            "saved from a different architecture than '%s'. Check --model "
+            "and verify that the layer names in BINARIZATION/networks.py "
+            "match the checkpoint.", model_name,
         )
         raise
 
@@ -220,7 +236,7 @@ def binarize_image(
     threshold: float,
 ) -> None:
     """Read an image, tile it, run inference, stitch, threshold, and save."""
-    print(f"\n>> Binarizing '{image_path}'")
+    logger.debug("Binarizing '%s'", image_path)
 
     xres = read_dpi(image_path)
     img = read_image_bgr8(image_path)
@@ -241,8 +257,10 @@ def binarize_image(
     n_y = (h + pad_h) // stride
     n_x = (w + pad_w) // stride
     total_tiles = n_y * n_x
-    print(f"   Image {w}x{h}, padded to {w + pad_w}x{h + pad_h}, "
-          f"{n_x}x{n_y} = {total_tiles} tile(s)")
+    logger.debug(
+        "Image %dx%d, padded to %dx%d, %dx%d = %d tile(s)",
+        w, h, w + pad_w, h + pad_h, n_x, n_y, total_tiles,
+    )
 
     output = np.zeros((h + pad_h, w + pad_w), dtype=np.float32)
 
@@ -270,7 +288,7 @@ def binarize_image(
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     save_bilevel_tiff(mask, output_path, xres)
-    print(f"   Saved '{output_path}'")
+    logger.debug("Saved '%s'", output_path)
 
 
 def main() -> None:
@@ -314,25 +332,31 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    _configure_logging()
+
     if not os.path.isdir(args.image_dir):
-        sys.exit(f"ERROR: image directory not found: {args.image_dir}")
+        logger.error("image directory not found: %s", args.image_dir)
+        sys.exit(1)
 
     if not os.path.isdir(args.weights_dir):
-        sys.exit(f"ERROR: weights directory not found: {args.weights_dir}")
+        logger.error("weights directory not found: %s", args.weights_dir)
+        sys.exit(1)
 
     weights_file = f"{args.dataset}_{args.model}.th"
     weights_path = os.path.join(args.weights_dir, weights_file)
     if not os.path.isfile(weights_path):
         available = [f for f in os.listdir(args.weights_dir) if f.endswith(".th")]
-        sys.exit(
-            f"ERROR: weight file not found: {weights_path}\n"
-            f"Available .th files in '{args.weights_dir}':\n"
-            + "\n".join(f"  - {f}" for f in sorted(available))
+        logger.error(
+            "weight file not found: %s; available in '%s': %s",
+            weights_path, args.weights_dir,
+            ", ".join(sorted(available)) if available else "(none)",
         )
+        sys.exit(1)
 
     images = collect_images(args.image_dir)
     if not images:
-        sys.exit(f"ERROR: no image files found in {args.image_dir}")
+        logger.error("no image files found in %s", args.image_dir)
+        sys.exit(1)
 
     verify_crop_prefix(images)
 
@@ -342,7 +366,7 @@ def main() -> None:
     else:
         threshold = TTA_THRESHOLD if tta else SINGLE_THRESHOLD
 
-    print(f"Loading model '{args.model}' from '{weights_path}'")
+    logger.info("Loading model '%s' from '%s'", args.model, weights_path)
     model = load_model(weights_path, args.model)
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -351,9 +375,9 @@ def main() -> None:
     failed: list[tuple[str, str]] = []
     mode_label = "8-view TTA" if tta else "single-view"
 
-    print(f"Found {total} image(s) under '{args.image_dir}'")
-    print(f"Output directory: '{args.output_dir}'")
-    print(f"Mode: {mode_label}, threshold: {threshold}\n")
+    logger.info("Found %d image(s) under '%s'", total, args.image_dir)
+    logger.info("Output directory: '%s'", args.output_dir)
+    logger.info("Mode: %s, threshold: %s", mode_label, threshold)
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
@@ -361,22 +385,22 @@ def main() -> None:
             image_path, args.image_dir, args.output_dir,
         )
 
-        print(f"--- [{idx}/{total}] {rel} ---")
         try:
             binarize_image(image_path, output_path, model, tta, threshold)
         except (RuntimeError, OSError, ValueError) as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             failed.append((rel, str(e)))
             continue
 
-        print(f"    OK\n")
+        logger.info("[%d/%d] %s -- OK", idx, total, rel)
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info(
+        "Processed %d/%d image(s) successfully.", total - len(failed), total,
+    )
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.info("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.info("  - %s: %s", name, err)
         sys.exit(1)
 
 

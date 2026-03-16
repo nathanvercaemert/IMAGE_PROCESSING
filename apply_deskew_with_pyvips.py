@@ -21,10 +21,26 @@ Requires: pyvips (with libvips) installed
 """
 
 import argparse
+import logging
 import os
 import sys
 
 import pyvips
+
+logger = logging.getLogger("apply_deskew_with_pyvips")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
 
 IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp",
@@ -85,7 +101,7 @@ def read_skew_data(skew_path: str) -> tuple[float, float]:
 
 def deskew_image(image_path: str, output_path: str, angle: float) -> None:
     """Rotate *image_path* by *angle* degrees and save to *output_path*."""
-    print(f"\n>> Deskewing '{image_path}' by {angle:.4f} degrees")
+    logger.debug("Deskewing '%s' by %.4f degrees", image_path, angle)
 
     page = pyvips.Image.new_from_file(image_path, access="sequential")
 
@@ -103,7 +119,7 @@ def deskew_image(image_path: str, output_path: str, angle: float) -> None:
     rotated = rotated.copy(xres=xres, yres=yres)
 
     rotated.write_to_file(output_path)
-    print(f"   Saved '{output_path}'")
+    logger.debug("Saved '%s'", output_path)
 
 
 def verify_rot_prefix(images: list[str]) -> None:
@@ -111,12 +127,13 @@ def verify_rot_prefix(images: list[str]) -> None:
     for image_path in images:
         filename = os.path.basename(image_path)
         if not filename.startswith("ROT"):
-            sys.exit(
-                f"ERROR: filename does not start with 'ROT': {image_path}"
-            )
+            logger.error("filename does not start with 'ROT': %s", image_path)
+            sys.exit(1)
 
 
 def main() -> None:
+    _configure_logging()
+
     parser = argparse.ArgumentParser(
         description="Apply deskew correction to ROT-prefixed images using "
                     "pyvips and saved skew angle files.  Replaces ROT prefix "
@@ -127,22 +144,25 @@ def main() -> None:
     args = parser.parse_args()
 
     if not os.path.isdir(args.image_dir):
-        sys.exit(f"ERROR: image directory not found: {args.image_dir}")
+        logger.error("image directory not found: %s", args.image_dir)
+        sys.exit(1)
 
     if not os.path.isdir(args.data_dir):
-        sys.exit(f"ERROR: data directory not found: {args.data_dir}")
+        logger.error("data directory not found: %s", args.data_dir)
+        sys.exit(1)
 
     images = collect_images(args.image_dir)
     if not images:
-        sys.exit(f"ERROR: no image files found in {args.image_dir}")
+        logger.error("no image files found in %s", args.image_dir)
+        sys.exit(1)
 
     verify_rot_prefix(images)
 
     total = len(images)
     failed: list[tuple[str, str]] = []
 
-    print(f"Found {total} image(s) under '{args.image_dir}'")
-    print(f"Processing in place (ROT -> SKEW)\n")
+    logger.info("Found %d image(s) under '%s'", total, args.image_dir)
+    logger.info("Processing in place (ROT -> SKEW)")
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
@@ -151,7 +171,6 @@ def main() -> None:
         )
         skew_path = build_skew_path(image_path)
 
-        print(f"--- [{idx}/{total}] {rel} ---")
         try:
             angle, confidence = read_skew_data(skew_data_path)
 
@@ -166,18 +185,17 @@ def main() -> None:
                 os.remove(image_path)
                 action = f"deskewed {angle:.4f} deg (confidence={confidence:.4f})"
         except (RuntimeError, FileNotFoundError, ValueError, OSError) as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             failed.append((rel, str(e)))
             continue
 
-        print(f"    OK ({action})\n")
+        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.error("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.error("  - %s: %s", name, err)
         sys.exit(1)
 
 

@@ -19,10 +19,26 @@ Requires: ImageMagick (magick) on PATH
 """
 
 import argparse
+import logging
 import os
 import re
 import subprocess
 import sys
+
+logger = logging.getLogger("fix_upside_down_with_magick")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
 
 IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp",
@@ -41,14 +57,13 @@ def collect_images(directory: str) -> list[str]:
 
 
 def run(cmd: list[str], description: str) -> None:
-    """Run a command, printing what it does and aborting on failure."""
-    print(f"\n>> {description}")
-    print(f"   $ {' '.join(cmd)}")
+    """Run a command, logging what it does and aborting on failure."""
+    logger.debug("%s -- $ %s", description, " ".join(cmd))
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.stdout:
-        print(result.stdout.rstrip())
+        logger.debug("%s", result.stdout.rstrip())
     if result.stderr:
-        print(result.stderr.rstrip(), file=sys.stderr)
+        logger.debug("%s", result.stderr.rstrip())
     if result.returncode != 0:
         raise RuntimeError(
             f"Command failed with exit code {result.returncode}: {' '.join(cmd)}"
@@ -103,12 +118,13 @@ def verify_raw_prefix(images: list[str]) -> None:
     for image_path in images:
         filename = os.path.basename(image_path)
         if not filename.startswith("RAW"):
-            sys.exit(
-                f"ERROR: filename does not start with 'RAW': {image_path}"
-            )
+            logger.error("filename does not start with 'RAW': %s", image_path)
+            sys.exit(1)
 
 
 def main() -> None:
+    _configure_logging()
+
     parser = argparse.ArgumentParser(
         description="Fix upside-down images in place using ImageMagick and "
                     "saved 0/180 orientation files.  Replaces RAW prefix "
@@ -119,22 +135,25 @@ def main() -> None:
     args = parser.parse_args()
 
     if not os.path.isdir(args.image_dir):
-        sys.exit(f"ERROR: image directory not found: {args.image_dir}")
+        logger.error("image directory not found: %s", args.image_dir)
+        sys.exit(1)
 
     if not os.path.isdir(args.data_dir):
-        sys.exit(f"ERROR: data directory not found: {args.data_dir}")
+        logger.error("data directory not found: %s", args.data_dir)
+        sys.exit(1)
 
     images = collect_images(args.image_dir)
     if not images:
-        sys.exit(f"ERROR: no image files found in {args.image_dir}")
+        logger.error("no image files found in %s", args.image_dir)
+        sys.exit(1)
 
     verify_raw_prefix(images)
 
     total = len(images)
     failed: list[tuple[str, str]] = []
 
-    print(f"Found {total} image(s) under '{args.image_dir}'")
-    print(f"Processing in place (RAW -> ROT)\n")
+    logger.info("Found %d image(s) under '%s'", total, args.image_dir)
+    logger.info("Processing in place (RAW -> ROT)")
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
@@ -143,7 +162,6 @@ def main() -> None:
         )
         rot_path = build_rot_path(image_path)
 
-        print(f"--- [{idx}/{total}] {rel} ---")
         try:
             orientation = read_orientation(orientation_path)
 
@@ -159,18 +177,17 @@ def main() -> None:
                 os.rename(image_path, rot_path)
                 action = "renamed (no rotation needed)"
         except (RuntimeError, FileNotFoundError, ValueError, OSError) as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             failed.append((rel, str(e)))
             continue
 
-        print(f"    OK ({action})\n")
+        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.error("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.error("  - %s: %s", name, err)
         sys.exit(1)
 
 

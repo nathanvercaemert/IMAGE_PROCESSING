@@ -29,10 +29,27 @@ Requires: pyvips (with libvips) installed
 
 import argparse
 import json
+import logging
 import os
 import sys
 
 import pyvips
+
+logger = logging.getLogger("draw_compound_bounding_boxes")
+
+
+def _configure_logging() -> None:
+    """Set up one-line structured logging to stderr."""
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%S",
+    )
+    handler.setFormatter(formatter)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
 
 IMAGE_EXTENSIONS = {
     ".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp",
@@ -58,9 +75,8 @@ def verify_skew_prefix(images: list[str]) -> None:
     for image_path in images:
         filename = os.path.basename(image_path)
         if not filename.startswith("SKEW"):
-            sys.exit(
-                f"ERROR: filename does not start with 'SKEW': {image_path}"
-            )
+            logger.error("filename does not start with 'SKEW': %s", image_path)
+            sys.exit(1)
 
 
 def build_boxes_data_path(
@@ -129,7 +145,7 @@ def draw_compound_box(
     Returns the buffered crop region as (left, top, width, height),
     clamped to image dimensions.
     """
-    print(f"\n>> Drawing compound box on '{image_path}'")
+    logger.debug("Drawing compound box on '%s'", image_path)
 
     image = pyvips.Image.new_from_file(image_path, access="sequential")
     w, h = image.width, image.height
@@ -185,7 +201,7 @@ def draw_compound_box(
     image = image.copy(xres=xres, yres=yres)
 
     image.write_to_file(output_path)
-    print(f"   Saved '{output_path}'")
+    logger.debug("Saved '%s'", output_path)
 
     crop_w = crop_right - crop_left
     crop_h = crop_bottom - crop_top
@@ -193,6 +209,8 @@ def draw_compound_box(
 
 
 def main() -> None:
+    _configure_logging()
+
     parser = argparse.ArgumentParser(
         description="Draw compound bounding boxes on SKEW-prefixed images "
                     "using pyvips and saved bounding box JSON files.  "
@@ -203,22 +221,25 @@ def main() -> None:
     args = parser.parse_args()
 
     if not os.path.isdir(args.image_dir):
-        sys.exit(f"ERROR: image directory not found: {args.image_dir}")
+        logger.error("image directory not found: %s", args.image_dir)
+        sys.exit(1)
 
     if not os.path.isdir(args.data_dir):
-        sys.exit(f"ERROR: data directory not found: {args.data_dir}")
+        logger.error("data directory not found: %s", args.data_dir)
+        sys.exit(1)
 
     images = collect_images(args.image_dir)
     if not images:
-        sys.exit(f"ERROR: no image files found in {args.image_dir}")
+        logger.error("no image files found in %s", args.image_dir)
+        sys.exit(1)
 
     verify_skew_prefix(images)
 
     total = len(images)
     failed: list[tuple[str, str]] = []
 
-    print(f"Found {total} image(s) under '{args.image_dir}'")
-    print(f"Processing in place (SKEW -> BOUND)\n")
+    logger.info("Found %d image(s) under '%s'", total, args.image_dir)
+    logger.info("Processing in place (SKEW -> BOUND)")
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
@@ -230,7 +251,6 @@ def main() -> None:
         )
         bound_path = build_bound_path(image_path)
 
-        print(f"--- [{idx}/{total}] {rel} ---")
         try:
             boxes = read_boxes(boxes_data_path)
 
@@ -252,18 +272,17 @@ def main() -> None:
                     f"crop={crop_left},{crop_top} {crop_w}x{crop_h}"
                 )
         except (RuntimeError, FileNotFoundError, ValueError, OSError) as e:
-            print(f"    FAILED: {e}\n", file=sys.stderr)
+            logger.error("[%d/%d] %s -- %s", idx, total, rel, e)
             failed.append((rel, str(e)))
             continue
 
-        print(f"    OK ({action})\n")
+        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
-    print("=" * 60)
-    print(f"Processed {total - len(failed)}/{total} image(s) successfully.")
+    logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
-        print(f"\n{len(failed)} failure(s):")
+        logger.error("%d failure(s):", len(failed))
         for name, err in failed:
-            print(f"  - {name}: {err}")
+            logger.error("  - %s: %s", name, err)
         sys.exit(1)
 
 
