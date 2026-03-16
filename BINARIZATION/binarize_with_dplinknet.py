@@ -156,22 +156,22 @@ def read_image_bgr8(path: str) -> np.ndarray:
 
 
 def preprocess_tile(tile: np.ndarray) -> torch.Tensor:
-    """BGR uint8 HWC -> float32 NCHW tensor, DP-LinkNet normalization."""
+    """BGR uint8 HWC -> float32 CHW tensor, DP-LinkNet normalization."""
     x = tile.astype(np.float32) / 255.0 * 3.2 - 1.6
     x = x.transpose(2, 0, 1)
-    return torch.from_numpy(x).unsqueeze(0)
+    return torch.from_numpy(x)
 
 
 def predict_tile(model: torch.nn.Module, tile: np.ndarray) -> np.ndarray:
     """Run a single forward pass on one tile.  Returns HW float32 map."""
-    tensor = preprocess_tile(tile)
+    tensor = preprocess_tile(tile).unsqueeze(0)
     with torch.no_grad():
         out = model(tensor)
     return out.squeeze().cpu().numpy()
 
 
 def predict_tile_tta(model: torch.nn.Module, tile: np.ndarray) -> np.ndarray:
-    """Run 8-view TTA on one tile.  Returns summed HW float32 map."""
+    """Run batched 8-view TTA on one tile.  Returns summed HW float32 map."""
     t = tile.transpose(1, 0, 2)
 
     views = [
@@ -185,27 +185,20 @@ def predict_tile_tta(model: torch.nn.Module, tile: np.ndarray) -> np.ndarray:
         np.flip(np.flip(t, 0), 1).copy(),             # 7: transpose + hvflip
     ]
 
-    total = np.zeros((tile.shape[0], tile.shape[1]), dtype=np.float32)
+    batch = torch.stack([preprocess_tile(v) for v in views])
+    with torch.no_grad():
+        preds = model(batch).squeeze(1).cpu().numpy()
 
-    for i, view in enumerate(views):
-        pred = predict_tile(model, view)
-        if i == 1:
-            pred = np.flip(pred, 1).copy()
-        elif i == 2:
-            pred = np.flip(pred, 0).copy()
-        elif i == 3:
-            pred = np.flip(np.flip(pred, 0), 1).copy()
-        elif i == 4:
-            pred = pred.T.copy()
-        elif i == 5:
-            pred = np.flip(pred, 1).T.copy()
-        elif i == 6:
-            pred = np.flip(pred, 0).T.copy()
-        elif i == 7:
-            pred = np.flip(np.flip(pred, 0), 1).T.copy()
-        total += pred
+    # Invert each augmentation to align predictions back to original orientation
+    preds[1] = np.flip(preds[1], 1)
+    preds[2] = np.flip(preds[2], 0)
+    preds[3] = np.flip(np.flip(preds[3], 0), 1)
+    preds[4] = preds[4].T
+    preds[5] = np.flip(preds[5], 1).T
+    preds[6] = np.flip(preds[6], 0).T
+    preds[7] = np.flip(np.flip(preds[7], 0), 1).T
 
-    return total
+    return preds.sum(axis=0).copy()
 
 
 def read_dpi(path: str) -> float:

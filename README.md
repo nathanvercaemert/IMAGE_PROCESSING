@@ -73,3 +73,27 @@ Rotate images to correct skew using pyvips. Renames `ROT*` to `SKEW*` in `WORKIN
 ```bash
 docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing apply_deskew_with_pyvips.py /data/WORKING /data/DATA
 ```
+
+### Stage 4a: Detect Bounding Boxes
+
+Detect text bounding boxes for each SKEW-prefixed image in `WORKING/` using PaddleOCR. Writes `.boxes.json` files to `DATA/`.
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing detect_bounding_boxes_with_paddleocr.py /data/WORKING /data/DATA
+```
+
+### Stage 4b: Draw Compound Bounding Boxes
+
+Compute and draw a compound bounding rectangle around all detected text regions. Renames `SKEW*` to `BOUND*` in `WORKING/`.
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing draw_compound_bounding_boxes.py /data/WORKING /data/DATA
+```
+
+### Stage 4c: Crop Compound Bounding Boxes
+
+Crop images to their compound bounding box. Renames `BOUND*` to `CROP*` in `WORKING/`.
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing crop_compound_bounding_boxes.py /data/WORKING /data/DATA
+```
