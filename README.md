@@ -41,3 +41,19 @@ Assign scanner ICC profile to every image in `RAW/`, convert to ProPhoto working
 ```bash
 docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing batch_assign_convert_icc_profile.py /data/RAW /data/WORKING --scanner Scanner.icc --working ProPhoto.icc
 ```
+
+### Stage 2a: Detect Orientation
+
+Detect 0/180 orientation for each image in `WORKING/` using Tesseract OSD. Writes `.orientation.txt` files to `DATA/`.
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing detect_orientation_with_tesseract_osd.py /data/WORKING /data/DATA
+```
+
+### Stage 2b: Fix Upside-Down
+
+Rotate 180-degree images upright using ImageMagick. Renames `RAW*` to `ROT*` in `WORKING/` (rotating where needed).
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing fix_upside_down_with_magick.py /data/WORKING /data/DATA
+```

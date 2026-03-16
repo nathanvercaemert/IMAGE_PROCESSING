@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libheif-dev libde265-dev libopenjp2-7-dev \
         libbz2-dev zlib1g-dev libltdl-dev \
         libimage-exiftool-perl \
+        tesseract-ocr tesseract-ocr-osd \
     && rm -rf /var/lib/apt/lists/*
 
 # ── ImageMagick 7 from source ────────────────────────────────────────
@@ -52,4 +53,5 @@ WORKDIR /opt/image_processing
 # ── Verify installs ─────────────────────────────────────────────────
 RUN magick -version \
     && magick -list configure | grep DELEGATES \
-    && exiftool -ver
+    && exiftool -ver \
+    && tesseract --version
