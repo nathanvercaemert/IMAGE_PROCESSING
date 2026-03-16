@@ -15,7 +15,7 @@ Takes RAW-prefixed files from raw_dir and produces CROP-prefixed files
 in working_dir, with all sidecar data files accumulated in data_dir.
 
 Usage:
-    python orchestrator.py <raw_dir> <working_dir> <data_dir> --scanner <scanner.icc> --working <working.icc>
+    python orchestrator.py <raw_dir> <working_dir> <data_dir>
 
 Requires: all dependencies of the individual pipeline scripts
 """
@@ -39,6 +39,10 @@ import draw_compound_bounding_boxes as draw_mod
 import crop_compound_bounding_boxes as crop_mod
 
 logger = logging.getLogger("orchestrator")
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCANNER_ICC = os.path.join(_SCRIPT_DIR, "Scanner.icc")
+WORKING_ICC = os.path.join(_SCRIPT_DIR, "ProPhoto.icc")
 
 
 def _configure_logging() -> None:
@@ -517,26 +521,23 @@ def main() -> None:
         "data_dir",
         help="Directory to accumulate sidecar data files",
     )
-    parser.add_argument(
-        "--scanner", required=True,
-        help="Scanner ICC profile to assign",
-    )
-    parser.add_argument(
-        "--working", required=True,
-        help="Working-space ICC profile to convert to",
-    )
     args = parser.parse_args()
 
     if not os.path.isdir(args.raw_dir):
         logger.error("raw directory not found: %s", args.raw_dir)
         sys.exit(1)
 
+    for label, path in [("Scanner", SCANNER_ICC), ("Working", WORKING_ICC)]:
+        if not os.path.isfile(path):
+            logger.error("%s ICC profile not found: %s", label, path)
+            sys.exit(1)
+
     stages = [
         (
             "ICC profile assignment",
             lambda: stage_icc(
                 args.raw_dir, args.working_dir,
-                args.scanner, args.working,
+                SCANNER_ICC, WORKING_ICC,
             ),
         ),
         (
