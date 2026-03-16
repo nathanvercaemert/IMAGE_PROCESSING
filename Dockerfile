@@ -12,6 +12,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libbz2-dev zlib1g-dev libltdl-dev \
         libimage-exiftool-perl \
         tesseract-ocr tesseract-ocr-osd \
+        libleptonica-dev \
+        libvips-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ── ImageMagick 7 from source ────────────────────────────────────────
@@ -35,7 +37,7 @@ RUN git clone --depth 1 https://github.com/ImageMagick/ImageMagick.git /tmp/imag
 
 # ── Python + pip dependencies ────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv \
+        python3 python3-dev python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/bin/python3 /usr/bin/python
 
@@ -50,8 +52,12 @@ RUN git clone --depth 1 https://github.com/nathanvercaemert/IMAGE_PROCESSING.git
 
 WORKDIR /opt/image_processing
 
+# ── Build lept_skew from source ───────────────────────────────────────
+RUN gcc -O2 lept_skew.c -o /usr/local/bin/lept_skew $(pkg-config --cflags --libs lept)
+
 # ── Verify installs ─────────────────────────────────────────────────
 RUN magick -version \
     && magick -list configure | grep DELEGATES \
     && exiftool -ver \
-    && tesseract --version
+    && tesseract --version \
+    && lept_skew 2>&1 || true

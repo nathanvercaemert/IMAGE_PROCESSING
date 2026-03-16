@@ -57,3 +57,19 @@ Rotate 180-degree images upright using ImageMagick. Renames `RAW*` to `ROT*` in 
 ```bash
 docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing fix_upside_down_with_magick.py /data/WORKING /data/DATA
 ```
+
+### Stage 3a: Determine Skew Angle
+
+Detect skew angle for each ROT-prefixed image in `WORKING/` using Leptonica. Writes `.skew.txt` files to `DATA/`.
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing determine_skew_angle.py /data/WORKING /data/DATA
+```
+
+### Stage 3b: Apply Deskew
+
+Rotate images to correct skew using pyvips. Renames `ROT*` to `SKEW*` in `WORKING/` (deskewing where needed).
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing apply_deskew_with_pyvips.py /data/WORKING /data/DATA
+```
