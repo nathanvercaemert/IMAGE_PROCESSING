@@ -164,7 +164,9 @@ def main() -> None:
 
     detector = TextDetection(**det_kwargs)
 
+    logging.getLogger().handlers.clear()
     _configure_logging()
+    logging.getLogger("pyvips").setLevel(logging.WARNING)
 
     total = len(images)
     failed: list[tuple[str, str]] = []

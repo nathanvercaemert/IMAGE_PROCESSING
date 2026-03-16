@@ -2,8 +2,18 @@
 
 ## Build
 
+Uses cached layers when possible. Fast if only later layers changed.
+
 ```bash
 docker build -t image-processing .
+```
+
+## Rebuild (no cache)
+
+Ignores all cached layers and rebuilds everything from scratch. Use this after pushing code changes to GitHub to ensure the cloned repo inside the image is up to date.
+
+```bash
+docker build --no-cache -t image-processing .
 ```
 
 ## Run
@@ -12,14 +22,6 @@ Expects `RAW/` inside the bind-mounted folder. Creates `WORKING/` and `DATA/` th
 
 ```bash
 docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing
-```
-
-## Rebuild
-
-Remove old image and build fresh.
-
-```bash
-docker rmi image-processing && docker build -t image-processing .
 ```
 
 ## Cleanup

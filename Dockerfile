@@ -1,6 +1,7 @@
 FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 
 # ── System packages: build toolchain, IM7 delegates, exiftool ────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -15,6 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libleptonica-dev \
         libvips-dev \
         libgl1 libglib2.0-0 \
+        ccache \
     && rm -rf /var/lib/apt/lists/*
 
 # ── ImageMagick 7 from source ────────────────────────────────────────
@@ -46,7 +48,8 @@ RUN pip3 install --no-cache-dir --break-system-packages \
         pyvips \
         numpy \
         paddlepaddle==3.2.2 \
-        paddleocr
+        paddleocr \
+        "requests>=2.32.0"
 
 RUN python -c "from paddleocr import TextDetection; TextDetection(device='cpu')"
 
