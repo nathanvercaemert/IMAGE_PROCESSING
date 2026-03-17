@@ -18,7 +18,7 @@ docker build --no-cache -t image-processing .
 
 ## Run
 
-Expects `RAW/` inside the bind-mounted folder. Creates `WORKING/` and `DATA/` there.
+Runs the full pipeline. Expects `RAW/` inside the bind-mounted folder. Creates `WORKING/` and `DATA/` there.
 
 ```bash
 docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing

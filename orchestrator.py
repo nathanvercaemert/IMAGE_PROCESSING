@@ -56,6 +56,7 @@ def _configure_logging() -> None:
     root = logging.getLogger()
     root.addHandler(handler)
     root.setLevel(logging.INFO)
+    logging.getLogger("pyvips").setLevel(logging.WARNING)
 
 
 def verify_prefix(images: list[str], prefix: str) -> None:

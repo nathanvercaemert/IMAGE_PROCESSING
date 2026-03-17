@@ -49,7 +49,7 @@ RUN pip3 install --no-cache-dir --break-system-packages \
         numpy \
         paddlepaddle==3.2.2 \
         paddleocr \
-        "requests>=2.32.0"
+        "chardet>=3.0.2,<6"
 
 RUN python -c "from paddleocr import TextDetection; TextDetection(device='cpu')"
 
@@ -67,3 +67,6 @@ RUN magick -version \
     && exiftool -ver \
     && tesseract --version \
     && lept_skew 2>&1 || true
+
+ENTRYPOINT ["python", "orchestrator.py"]
+CMD ["/data/RAW", "/data/WORKING", "/data/DATA"]
