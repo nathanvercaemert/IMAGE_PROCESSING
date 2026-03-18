@@ -26,6 +26,7 @@ import logging
 import os
 import sys
 
+import pyvips
 from paddleocr import TextDetection
 
 import assign_convert_icc_profile as icc_mod
@@ -449,7 +450,19 @@ def stage_draw_boxes(working_dir: str, data_dir: str) -> None:
 
 # ── Stage 8: Crop to compound bounding box ──────────────────────────
 
-def stage_crop(working_dir: str, data_dir: str) -> None:
+def _save_drawing(src: str, dest: str) -> None:
+    """Save a low-resolution 24-bit copy of *src* to *dest* for visual checks."""
+    image = pyvips.Image.new_from_file(src, access="sequential")
+    image = image.shrink(12, 12)
+    image = image.cast("uchar", shift=True)
+    dpi = 100 / 25.4
+    image = image.copy(xres=dpi, yres=dpi)
+    image.write_to_file(dest)
+
+
+def stage_crop(
+    working_dir: str, data_dir: str, drawings_dir: str | None = None,
+) -> None:
     images = crop_mod.collect_images(working_dir)
     if not images:
         raise RuntimeError(f"no image files found in {working_dir}")
@@ -462,12 +475,24 @@ def stage_crop(working_dir: str, data_dir: str) -> None:
     logger.info("Found %d image(s) under '%s'", total, working_dir)
     logger.info("Processing in place (BOUND -> CROP)")
 
+    if drawings_dir is not None:
+        os.makedirs(drawings_dir, exist_ok=True)
+        logger.info("Preserving drawings to '%s'", drawings_dir)
+
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, working_dir)
         compound_data_path = crop_mod.build_compound_data_path(
             image_path, working_dir, data_dir,
         )
         crop_path = crop_mod.build_crop_path(image_path)
+
+        if drawings_dir is not None:
+            draw_name = "DRAW" + os.path.basename(image_path)[5:]
+            draw_dest = os.path.join(
+                drawings_dir, os.path.dirname(rel), draw_name,
+            )
+            os.makedirs(os.path.dirname(draw_dest), exist_ok=True)
+            _save_drawing(image_path, draw_dest)
 
         try:
             if not os.path.isfile(compound_data_path):
@@ -522,6 +547,14 @@ def main() -> None:
         "data_dir",
         help="Directory to accumulate sidecar data files",
     )
+    parser.add_argument(
+        "--preserve-drawings",
+        metavar="DRAWINGS_DIR",
+        default=None,
+        help="Copy BOUND images (with drawn bounding boxes) to "
+             "DRAWINGS_DIR before cropping, renaming the BOUND "
+             "prefix to DRAW",
+    )
     args = parser.parse_args()
 
     if not os.path.isdir(args.raw_dir):
@@ -567,7 +600,9 @@ def main() -> None:
         ),
         (
             "Crop to compound bounding box",
-            lambda: stage_crop(args.working_dir, args.data_dir),
+            lambda: stage_crop(
+                args.working_dir, args.data_dir, args.preserve_drawings,
+            ),
         ),
     ]
 

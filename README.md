@@ -24,6 +24,14 @@ Runs the full pipeline. Expects `RAW/` inside the bind-mounted folder. Creates `
 docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing
 ```
 
+### Preserve drawings
+
+To keep a copy of the bounding-box drawings before they are cropped away, add `--preserve-drawings`. The BOUND images are copied to the given directory with the prefix renamed from `BOUND` to `DRAW`.
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --preserve-drawings /data/DRAWINGS
+```
+
 ## Cleanup
 
 Remove stopped containers and dangling layers. Keeps the built image.
@@ -99,3 +107,5 @@ Crop images to their compound bounding box. Renames `BOUND*` to `CROP*` in `WORK
 ```bash
 docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" --entrypoint python image-processing crop_compound_bounding_boxes.py /data/WORKING /data/DATA
 ```
+
+> **Note:** When run via the orchestrator with `--preserve-drawings /data/DRAWINGS`, BOUND images are copied to the drawings directory (prefix renamed to `DRAW`) before this crop step executes. The standalone script above does not support this option — it is orchestrator-only.
