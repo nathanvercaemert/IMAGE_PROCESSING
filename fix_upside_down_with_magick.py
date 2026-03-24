@@ -1,7 +1,7 @@
 """
 Rotate upside-down images back upright with ImageMagick (in-place).
 
-Walks image_dir recursively, reads the matching *.orientation.txt file
+Reads the matching *.orientation.txt file for each image in image_dir
 from data_dir (created by detect_orientation_with_tesseract_osd.py),
 and processes each image in place.  Every image filename must start with
 the prefix "RAW"; the script terminates immediately if any does not.
@@ -46,12 +46,11 @@ IMAGE_EXTENSIONS = {
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths under *directory* (recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
@@ -84,10 +83,10 @@ def get_bit_depth(image_path: str) -> str:
     return result.stdout.strip()
 
 
-def build_orientation_path(image_path: str, image_root: str, data_root: str) -> str:
+def build_orientation_path(image_path: str, data_root: str) -> str:
     """Map an image path to its orientation text file path under data_root."""
-    rel = os.path.relpath(image_path, image_root)
-    return os.path.join(data_root, rel + ".orientation.txt")
+    filename = os.path.basename(image_path)
+    return os.path.join(data_root, filename + ".orientation.txt")
 
 
 def build_rot_path(image_path: str) -> str:
@@ -157,9 +156,7 @@ def main() -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
-        orientation_path = build_orientation_path(
-            image_path, args.image_dir, args.data_dir
-        )
+        orientation_path = build_orientation_path(image_path, args.data_dir)
         rot_path = build_rot_path(image_path)
 
         try:
@@ -181,7 +178,7 @@ def main() -> None:
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
+        logger.debug("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
     logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:

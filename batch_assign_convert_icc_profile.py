@@ -39,7 +39,7 @@ IMAGE_EXTENSIONS = {
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths in *directory* (non-recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
     for name in os.listdir(directory):
         if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
@@ -87,7 +87,7 @@ def main() -> None:
             assign_convert_icc(
                 input_path, output_path, args.scanner, args.working
             )
-            logger.info("[%d/%d] %s -- OK", idx, total, filename)
+            logger.debug("[%d/%d] %s -- OK", idx, total, filename)
         except (RuntimeError, FileNotFoundError) as e:
             logger.error("[%d/%d] %s -- %s", idx, total, filename, e)
             failed.append((filename, str(e)))

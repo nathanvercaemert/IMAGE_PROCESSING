@@ -1,7 +1,7 @@
 """
 Detect 0/180 image orientation with Tesseract OSD.
 
-For each image under image_dir (recursively), writes a sibling text file
+For each image in image_dir, writes a sibling text file
 under data_dir that contains either "0" or "180".
 
 Usage:
@@ -41,12 +41,11 @@ ORIENTATION_RE = re.compile(r"Orientation in degrees:\s*(\d+)")
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths under *directory* (recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
@@ -77,10 +76,10 @@ def detect_orientation(image_path: str) -> int:
     return orientation
 
 
-def build_output_path(image_path: str, image_root: str, data_root: str) -> str:
+def build_output_path(image_path: str, data_root: str) -> str:
     """Map an image path to its orientation text file path under data_root."""
-    rel = os.path.relpath(image_path, image_root)
-    return os.path.join(data_root, rel + ".orientation.txt")
+    filename = os.path.basename(image_path)
+    return os.path.join(data_root, filename + ".orientation.txt")
 
 
 def main() -> None:
@@ -112,7 +111,7 @@ def main() -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
-        out_path = build_output_path(image_path, args.image_dir, args.data_dir)
+        out_path = build_output_path(image_path, args.data_dir)
 
         try:
             orientation = detect_orientation(image_path)
@@ -121,10 +120,9 @@ def main() -> None:
             failed.append((rel, str(e)))
             continue
 
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(f"{orientation}\n")
-        logger.info("[%d/%d] %s -- OK (%d)", idx, total, rel, orientation)
+        logger.debug("[%d/%d] %s -- OK (%d)", idx, total, rel, orientation)
 
     logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:

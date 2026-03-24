@@ -32,6 +32,25 @@ To keep a copy of the bounding-box drawings before they are cropped away, add `-
 docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --preserve-drawings /data/DRAWINGS
 ```
 
+### Single-file reprocessing
+
+To reprocess a single image using existing data files (e.g. after manually editing orientation, skew, or compound crop coordinates), add `--single-file`. Detection stages are skipped entirely; all data files must already exist in `DATA/`. The compound data file defines both the drawn rectangle and the crop region.
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --single-file RAW_0001.tif
+```
+
+Required data files for a given `RAW_0001.tif`:
+- `DATA/RAW_0001.tif.orientation.txt` — orientation (0 or 180)
+- `DATA/ROT_0001.tif.skew.txt` — skew angle and confidence
+- `DATA/SKEW_0001.tif.compound.txt` — crop coordinates (optional; if absent, no drawing or crop is applied)
+
+Can be combined with `--preserve-drawings`:
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --single-file RAW_0001.tif --preserve-drawings /data/DRAWINGS
+```
+
 ## Cleanup
 
 Remove stopped containers and dangling layers. Keeps the built image.

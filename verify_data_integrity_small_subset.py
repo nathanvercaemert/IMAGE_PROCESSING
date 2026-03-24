@@ -57,12 +57,11 @@ SAMPLE_SIZE = 200
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths under *directory* (recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
@@ -279,18 +278,16 @@ def sample_pixel_depth(
 
 
 def match_working_path(
-    raw_path: str, raw_root: str, working_root: str, working_prefix: str,
+    raw_path: str, working_root: str, working_prefix: str,
 ) -> str | None:
     """Find the working-directory counterpart of a RAW image."""
-    rel = os.path.relpath(raw_path, raw_root)
-    rel_dir = os.path.dirname(rel)
-    filename = os.path.basename(rel)
+    filename = os.path.basename(raw_path)
 
     if not filename.startswith("RAW"):
         return None
 
     working_name = working_prefix + filename[3:]
-    candidate = os.path.join(working_root, rel_dir, working_name)
+    candidate = os.path.join(working_root, working_name)
     if os.path.isfile(candidate):
         return candidate
     return None
@@ -359,10 +356,10 @@ def main() -> None:
     for idx, raw_path in enumerate(raw_images, 1):
         rel = os.path.relpath(raw_path, args.raw_dir)
         working_path = match_working_path(
-            raw_path, args.raw_dir, args.working_dir, args.working_prefix
+            raw_path, args.working_dir, args.working_prefix
         )
 
-        logger.info("[%d/%d] %s", idx, total, rel)
+        logger.debug("[%d/%d] %s", idx, total, rel)
 
         if working_path is None:
             logger.info("[%d/%d] %s -- MISSING: no matching %s file", idx, total, rel, args.working_prefix)
@@ -429,10 +426,10 @@ def main() -> None:
             raw_depth = work_depth = None
 
         if raw_depth and work_depth:
-            logger.info("[%d/%d] %s -- RAW pixel depth: %s", idx, total, rel, raw_depth["verdict"])
+            logger.debug("[%d/%d] %s -- RAW pixel depth: %s", idx, total, rel, raw_depth["verdict"])
             for rs in raw_depth["regions"]:
                 logger.debug("[%d/%d] %s -- RAW region: %s", idx, total, rel, rs)
-            logger.info("[%d/%d] %s -- %s pixel depth: %s", idx, total, rel, args.working_prefix, work_depth["verdict"])
+            logger.debug("[%d/%d] %s -- %s pixel depth: %s", idx, total, rel, args.working_prefix, work_depth["verdict"])
             for rs in work_depth["regions"]:
                 logger.debug("[%d/%d] %s -- %s region: %s", idx, total, rel, args.working_prefix, rs)
 
@@ -473,7 +470,7 @@ def main() -> None:
             ok_count += 1
             actual = raw_depth["actual_depth"] if raw_depth else raw_info["depth"]
             total_bits = actual * raw_channels
-            logger.info(
+            logger.debug(
                 "[%d/%d] %s -- OK actual_depth=%dbit/ch (%dbit total) "
                 "channels=%d dpi=%.0fx%.0f RAW=%s %s=%s",
                 idx, total, rel, actual, total_bits, raw_channels,

@@ -1,7 +1,7 @@
 """
 Crop BOUND-prefixed images to their compound bounding box using pyvips.
 
-Walks image_dir recursively, reads the matching *.compound.txt file from
+Reads the matching *.compound.txt file for each image in image_dir from
 data_dir (created by draw_compound_bounding_boxes.py), and crops each
 image to the stored region (left, top, width, height).  Every image
 filename must start with the prefix "BOUND"; the script terminates
@@ -50,12 +50,11 @@ IMAGE_EXTENSIONS = {
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths under *directory* (recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
@@ -69,20 +68,15 @@ def verify_bound_prefix(images: list[str]) -> None:
             sys.exit(1)
 
 
-def build_compound_data_path(
-    image_path: str, image_root: str, data_root: str,
-) -> str:
+def build_compound_data_path(image_path: str, data_root: str) -> str:
     """Map an image path to its compound box data file path under data_root.
 
     The compound file was written against the SKEW-prefixed name, so we
-    must reconstruct that original relative path.
+    must reconstruct that name.
     """
-    rel = os.path.relpath(image_path, image_root)
-    rel_dir = os.path.dirname(rel)
-    filename = os.path.basename(rel)
+    filename = os.path.basename(image_path)
     skew_name = "SKEW" + filename[5:]
-    skew_rel = os.path.join(rel_dir, skew_name) if rel_dir else skew_name
-    return os.path.join(data_root, skew_rel + ".compound.txt")
+    return os.path.join(data_root, skew_name + ".compound.txt")
 
 
 def build_crop_path(image_path: str) -> str:
@@ -170,9 +164,7 @@ def main() -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
-        compound_data_path = build_compound_data_path(
-            image_path, args.image_dir, args.data_dir
-        )
+        compound_data_path = build_compound_data_path(image_path, args.data_dir)
         crop_path = build_crop_path(image_path)
 
         try:
@@ -189,7 +181,7 @@ def main() -> None:
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
+        logger.debug("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
     logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:

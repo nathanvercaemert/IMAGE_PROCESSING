@@ -1,7 +1,7 @@
 """
 Determine skew angle for ROT-prefixed images using leptonica.
 
-For each ROT-prefixed image under image_dir (recursively), runs lept_skew
+For each ROT-prefixed image in image_dir, runs lept_skew
 and writes a text file under data_dir containing the skew angle and
 confidence.  Every image filename must start with the prefix "ROT";
 the script terminates immediately if any does not.
@@ -41,12 +41,11 @@ IMAGE_EXTENSIONS = {
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths under *directory* (recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
@@ -76,10 +75,10 @@ def detect_skew(image_path: str) -> tuple[float, float]:
     return float(angle), float(confidence)
 
 
-def build_output_path(image_path: str, image_root: str, data_root: str) -> str:
+def build_output_path(image_path: str, data_root: str) -> str:
     """Map an image path to its skew data file path under data_root."""
-    rel = os.path.relpath(image_path, image_root)
-    return os.path.join(data_root, rel + ".skew.txt")
+    filename = os.path.basename(image_path)
+    return os.path.join(data_root, filename + ".skew.txt")
 
 
 def verify_rot_prefix(images: list[str]) -> None:
@@ -122,7 +121,7 @@ def main() -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
-        out_path = build_output_path(image_path, args.image_dir, args.data_dir)
+        out_path = build_output_path(image_path, args.data_dir)
 
         try:
             angle, confidence = detect_skew(image_path)
@@ -131,10 +130,9 @@ def main() -> None:
             failed.append((rel, str(e)))
             continue
 
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(f"{angle}\n{confidence}\n")
-        logger.info("[%d/%d] %s -- OK (angle=%.4f, confidence=%.4f)", idx, total, rel, angle, confidence)
+        logger.debug("[%d/%d] %s -- OK (angle=%.4f, confidence=%.4f)", idx, total, rel, angle, confidence)
 
     logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:

@@ -1,7 +1,7 @@
 """
 Apply deskew correction to ROT-prefixed images using pyvips.
 
-Walks image_dir recursively, reads the matching *.skew.txt file from
+Reads the matching *.skew.txt file for each image in image_dir from
 data_dir (created by determine_skew_angle.py), and rotates each image
 by the stored angle using pyvips with bicubic interpolation.  Every
 image filename must start with the prefix "ROT"; the script terminates
@@ -52,20 +52,19 @@ MIN_CONFIDENCE = 2.0
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths under *directory* (recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
 
-def build_skew_data_path(image_path: str, image_root: str, data_root: str) -> str:
+def build_skew_data_path(image_path: str, data_root: str) -> str:
     """Map an image path to its skew data file path under data_root."""
-    rel = os.path.relpath(image_path, image_root)
-    return os.path.join(data_root, rel + ".skew.txt")
+    filename = os.path.basename(image_path)
+    return os.path.join(data_root, filename + ".skew.txt")
 
 
 def build_skew_path(image_path: str) -> str:
@@ -167,9 +166,7 @@ def main() -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
-        skew_data_path = build_skew_data_path(
-            image_path, args.image_dir, args.data_dir
-        )
+        skew_data_path = build_skew_data_path(image_path, args.data_dir)
         skew_path = build_skew_path(image_path)
 
         try:
@@ -190,7 +187,7 @@ def main() -> None:
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
+        logger.debug("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
     logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:

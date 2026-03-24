@@ -1,7 +1,7 @@
 """
 Binarize CROP-prefixed images using the SBB hybrid CNN-Transformer model.
 
-Walks image_dir recursively, processes each CROP-prefixed image through
+Processes each CROP-prefixed image in image_dir through
 the SBB binarization model, and writes a single-channel binary mask to
 output_dir with the "BINARY" prefix.  Every image filename must start
 with the prefix "CROP"; the script terminates immediately if any does
@@ -54,12 +54,11 @@ IMAGE_EXTENSIONS = {
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths under *directory* (recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
@@ -73,16 +72,11 @@ def verify_crop_prefix(images: list[str]) -> None:
             sys.exit(1)
 
 
-def build_binary_path(
-    image_path: str, image_root: str, output_root: str,
-) -> str:
+def build_binary_path(image_path: str, output_root: str) -> str:
     """Map a CROP image path to its BINARY output path under output_root."""
-    rel = os.path.relpath(image_path, image_root)
-    rel_dir = os.path.dirname(rel)
-    filename = os.path.basename(rel)
+    filename = os.path.basename(image_path)
     binary_name = "BINARY" + filename[4:]
-    binary_rel = os.path.join(rel_dir, binary_name) if rel_dir else binary_name
-    return os.path.join(output_root, binary_rel)
+    return os.path.join(output_root, binary_name)
 
 
 def read_image_bgr8(path: str) -> np.ndarray:
@@ -135,7 +129,6 @@ def binarize_image(
 
     mask = binarizer.run(image=img)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     save_bilevel_tiff(mask.astype(np.uint8), output_path, xres)
     logger.debug("Saved '%s'", output_path)
 
@@ -192,9 +185,7 @@ def main() -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
-        output_path = build_binary_path(
-            image_path, args.image_dir, args.output_dir,
-        )
+        output_path = build_binary_path(image_path, args.output_dir)
 
         try:
             binarize_image(image_path, output_path, binarizer)
@@ -203,7 +194,7 @@ def main() -> None:
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK", idx, total, rel)
+        logger.debug("[%d/%d] %s -- OK", idx, total, rel)
 
     binarizer.end_session()
 

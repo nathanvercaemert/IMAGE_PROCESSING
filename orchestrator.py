@@ -94,7 +94,7 @@ def stage_icc(
             icc_mod.assign_convert_icc(
                 input_path, output_path, scanner, working,
             )
-            logger.info("[%d/%d] %s -- OK", idx, total, filename)
+            logger.debug("[%d/%d] %s -- OK", idx, total, filename)
         except (RuntimeError, FileNotFoundError) as e:
             logger.error("[%d/%d] %s -- %s", idx, total, filename, e)
             failed.append((filename, str(e)))
@@ -126,9 +126,7 @@ def stage_orientation_detect(working_dir: str, data_dir: str) -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, working_dir)
-        out_path = orient_mod.build_output_path(
-            image_path, working_dir, data_dir,
-        )
+        out_path = orient_mod.build_output_path(image_path, data_dir)
 
         try:
             orientation = orient_mod.detect_orientation(image_path)
@@ -137,10 +135,9 @@ def stage_orientation_detect(working_dir: str, data_dir: str) -> None:
             failed.append((rel, str(e)))
             continue
 
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(f"{orientation}\n")
-        logger.info("[%d/%d] %s -- OK (%d)", idx, total, rel, orientation)
+        logger.debug("[%d/%d] %s -- OK (%d)", idx, total, rel, orientation)
 
     logger.info(
         "Processed %d/%d image(s) successfully.", total - len(failed), total,
@@ -172,7 +169,7 @@ def stage_fix_upside_down(working_dir: str, data_dir: str) -> None:
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, working_dir)
         orientation_path = rotate_mod.build_orientation_path(
-            image_path, working_dir, data_dir,
+            image_path, data_dir,
         )
         rot_path = rotate_mod.build_rot_path(image_path)
 
@@ -201,7 +198,7 @@ def stage_fix_upside_down(working_dir: str, data_dir: str) -> None:
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
+        logger.debug("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
     logger.info(
         "Processed %d/%d image(s) successfully.", total - len(failed), total,
@@ -234,9 +231,7 @@ def stage_skew_detect(working_dir: str, data_dir: str) -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, working_dir)
-        out_path = skew_mod.build_output_path(
-            image_path, working_dir, data_dir,
-        )
+        out_path = skew_mod.build_output_path(image_path, data_dir)
 
         try:
             angle, confidence = skew_mod.detect_skew(image_path)
@@ -245,10 +240,9 @@ def stage_skew_detect(working_dir: str, data_dir: str) -> None:
             failed.append((rel, str(e)))
             continue
 
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(f"{angle}\n{confidence}\n")
-        logger.info(
+        logger.debug(
             "[%d/%d] %s -- OK (angle=%.4f, confidence=%.4f)",
             idx, total, rel, angle, confidence,
         )
@@ -283,7 +277,7 @@ def stage_deskew(working_dir: str, data_dir: str) -> None:
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, working_dir)
         skew_data_path = deskew_mod.build_skew_data_path(
-            image_path, working_dir, data_dir,
+            image_path, data_dir,
         )
         skew_path = deskew_mod.build_skew_path(image_path)
 
@@ -311,7 +305,7 @@ def stage_deskew(working_dir: str, data_dir: str) -> None:
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
+        logger.debug("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
     logger.info(
         "Processed %d/%d image(s) successfully.", total - len(failed), total,
@@ -350,9 +344,7 @@ def stage_bbox_detect(working_dir: str, data_dir: str) -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, working_dir)
-        out_path = bbox_mod.build_output_path(
-            image_path, working_dir, data_dir,
-        )
+        out_path = bbox_mod.build_output_path(image_path, data_dir)
 
         try:
             boxes = bbox_mod.detect_boxes(detector, image_path)
@@ -361,10 +353,9 @@ def stage_bbox_detect(working_dir: str, data_dir: str) -> None:
             failed.append((rel, str(e)))
             continue
 
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(boxes, f, indent=2)
-        logger.info(
+        logger.debug(
             "[%d/%d] %s -- OK (%d box(es))", idx, total, rel, len(boxes),
         )
 
@@ -397,11 +388,9 @@ def stage_draw_boxes(working_dir: str, data_dir: str) -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, working_dir)
-        boxes_data_path = draw_mod.build_boxes_data_path(
-            image_path, working_dir, data_dir,
-        )
+        boxes_data_path = draw_mod.build_boxes_data_path(image_path, data_dir)
         compound_data_path = draw_mod.build_compound_data_path(
-            image_path, working_dir, data_dir,
+            image_path, data_dir,
         )
         bound_path = draw_mod.build_bound_path(image_path)
 
@@ -417,9 +406,6 @@ def stage_draw_boxes(working_dir: str, data_dir: str) -> None:
                 )
                 os.remove(image_path)
 
-                os.makedirs(
-                    os.path.dirname(compound_data_path), exist_ok=True,
-                )
                 with open(compound_data_path, "w", encoding="utf-8") as f:
                     f.write(
                         f"{crop_left}\n{crop_top}\n{crop_w}\n{crop_h}\n"
@@ -434,7 +420,7 @@ def stage_draw_boxes(working_dir: str, data_dir: str) -> None:
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
+        logger.debug("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
     logger.info(
         "Processed %d/%d image(s) successfully.", total - len(failed), total,
@@ -482,16 +468,13 @@ def stage_crop(
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, working_dir)
         compound_data_path = crop_mod.build_compound_data_path(
-            image_path, working_dir, data_dir,
+            image_path, data_dir,
         )
         crop_path = crop_mod.build_crop_path(image_path)
 
         if drawings_dir is not None:
             draw_name = "DRAW" + os.path.basename(image_path)[5:]
-            draw_dest = os.path.join(
-                drawings_dir, os.path.dirname(rel), draw_name,
-            )
-            os.makedirs(os.path.dirname(draw_dest), exist_ok=True)
+            draw_dest = os.path.join(drawings_dir, draw_name)
             _save_drawing(image_path, draw_dest)
 
         try:
@@ -512,7 +495,7 @@ def stage_crop(
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
+        logger.debug("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
     logger.info(
         "Processed %d/%d image(s) successfully.", total - len(failed), total,
@@ -522,6 +505,193 @@ def stage_crop(
         for name, err in failed:
             logger.error("  - %s: %s", name, err)
         raise RuntimeError(f"Crop failed: {len(failed)} error(s)")
+
+
+# ── Single-file pipeline ─────────────────────────────────────────────
+
+def _validate_single_file(
+    filename: str, raw_dir: str, data_dir: str,
+) -> tuple[str, str, str, str | None]:
+    """Validate inputs for single-file mode.
+
+    Returns (raw_path, orientation_path, skew_path, compound_path).
+    compound_path is None when no compound data file exists (meaning
+    no text was detected — the image passes through without cropping).
+
+    Raises RuntimeError if any required file is missing.
+    """
+    if not filename.startswith("RAW"):
+        raise RuntimeError(
+            f"filename must start with 'RAW': {filename}"
+        )
+
+    suffix = filename[3:]
+
+    raw_path = os.path.join(raw_dir, filename)
+    if not os.path.isfile(raw_path):
+        raise RuntimeError(f"raw file not found: {raw_path}")
+
+    orientation_path = os.path.join(
+        data_dir, f"RAW{suffix}.orientation.txt",
+    )
+    if not os.path.isfile(orientation_path):
+        raise RuntimeError(
+            f"orientation data not found: {orientation_path}"
+        )
+
+    skew_path = os.path.join(data_dir, f"ROT{suffix}.skew.txt")
+    if not os.path.isfile(skew_path):
+        raise RuntimeError(f"skew data not found: {skew_path}")
+
+    compound_path = os.path.join(
+        data_dir, f"SKEW{suffix}.compound.txt",
+    )
+    if not os.path.isfile(compound_path):
+        compound_path = None
+
+    return raw_path, orientation_path, skew_path, compound_path
+
+
+def run_single_file(
+    filename: str,
+    raw_dir: str,
+    working_dir: str,
+    data_dir: str,
+    scanner_icc: str,
+    working_icc: str,
+    drawings_dir: str | None = None,
+) -> None:
+    """Process a single RAW file through the application stages.
+
+    Detection stages are skipped — all data files must already exist
+    in data_dir.
+    """
+    if not os.path.isdir(data_dir):
+        raise RuntimeError(f"data directory not found: {data_dir}")
+
+    raw_path, orientation_path, skew_path, compound_path = (
+        _validate_single_file(filename, raw_dir, data_dir)
+    )
+
+    os.makedirs(working_dir, exist_ok=True)
+
+    suffix = filename[3:]
+
+    # ── 1. ICC assign + convert ──────────────────────────────────
+    working_raw = os.path.join(working_dir, filename)
+    logger.info("ICC assign + convert: %s", filename)
+    icc_mod.assign_convert_icc(
+        raw_path, working_raw, scanner_icc, working_icc,
+    )
+
+    # ── 2. Fix upside-down (RAW -> ROT) ─────────────────────────
+    rot_name = "ROT" + suffix
+    rot_path = os.path.join(working_dir, rot_name)
+    orientation = rotate_mod.read_orientation(orientation_path)
+
+    if orientation == 180:
+        depth = rotate_mod.get_bit_depth(working_raw)
+        rotate_mod.run(
+            [
+                "magick", working_raw,
+                "-depth", depth,
+                "-rotate", "180",
+                rot_path,
+            ],
+            f"Rotating 180 (depth={depth}) -> '{rot_name}'",
+        )
+        os.remove(working_raw)
+        logger.info("Rotated 180: %s -> %s", filename, rot_name)
+    else:
+        os.rename(working_raw, rot_path)
+        logger.info("Renamed (no rotation): %s -> %s", filename, rot_name)
+
+    # ── 3. Deskew (ROT -> SKEW) ─────────────────────────────────
+    skew_name = "SKEW" + suffix
+    skew_image_path = os.path.join(working_dir, skew_name)
+    angle, confidence = deskew_mod.read_skew_data(skew_path)
+
+    if (
+        abs(angle) < deskew_mod.MIN_ANGLE
+        or confidence < deskew_mod.MIN_CONFIDENCE
+    ):
+        os.rename(rot_path, skew_image_path)
+        logger.info(
+            "Renamed (angle=%.4f, confidence=%.4f, below threshold): "
+            "%s -> %s", angle, confidence, rot_name, skew_name,
+        )
+    else:
+        deskew_mod.deskew_image(rot_path, skew_image_path, angle)
+        os.remove(rot_path)
+        logger.info(
+            "Deskewed %.4f deg (confidence=%.4f): %s -> %s",
+            angle, confidence, rot_name, skew_name,
+        )
+
+    # ── 4. Draw + crop (SKEW -> BOUND -> CROP) ──────────────────
+    bound_name = "BOUND" + suffix
+    bound_path = os.path.join(working_dir, bound_name)
+
+    if compound_path is None:
+        # No text detected — pass through without drawing or cropping.
+        os.rename(skew_image_path, bound_path)
+        logger.info(
+            "Renamed (no compound data): %s -> %s",
+            skew_name, bound_name,
+        )
+    else:
+        left, top, width, height = crop_mod.read_compound_data(
+            compound_path,
+        )
+
+        image = pyvips.Image.new_from_file(
+            skew_image_path, access="sequential",
+        )
+        img_w, img_h = image.width, image.height
+        if left + width > img_w or top + height > img_h:
+            raise RuntimeError(
+                f"compound coordinates ({left},{top} {width}x{height}) "
+                f"exceed image dimensions ({img_w}x{img_h})"
+            )
+
+        draw_mod.draw_rect_from_compound(
+            image, bound_path, left, top, width, height,
+        )
+        os.remove(skew_image_path)
+        logger.info(
+            "Drew compound rect %d,%d %dx%d: %s -> %s",
+            left, top, width, height, skew_name, bound_name,
+        )
+
+    # Preserve drawing if requested.
+    if drawings_dir is not None:
+        os.makedirs(drawings_dir, exist_ok=True)
+        draw_dest_name = "DRAW" + suffix
+        draw_dest = os.path.join(drawings_dir, draw_dest_name)
+        _save_drawing(bound_path, draw_dest)
+        logger.info("Saved drawing: %s", draw_dest_name)
+
+    # Crop.
+    crop_name = "CROP" + suffix
+    crop_path = os.path.join(working_dir, crop_name)
+
+    if compound_path is None:
+        os.rename(bound_path, crop_path)
+        logger.info(
+            "Renamed (no crop): %s -> %s", bound_name, crop_name,
+        )
+    else:
+        left, top, width, height = crop_mod.read_compound_data(
+            compound_path,
+        )
+        crop_mod.crop_image(
+            bound_path, crop_path, left, top, width, height,
+        )
+        os.remove(bound_path)
+        logger.info(
+            "Cropped to %d,%d %dx%d: %s -> %s",
+            left, top, width, height, bound_name, crop_name,
+        )
 
 
 # ── Main ─────────────────────────────────────────────────────────────
@@ -555,6 +725,16 @@ def main() -> None:
              "DRAWINGS_DIR before cropping, renaming the BOUND "
              "prefix to DRAW",
     )
+    parser.add_argument(
+        "--single-file",
+        metavar="FILENAME",
+        default=None,
+        help="Process a single RAW-prefixed file instead of the "
+             "full batch.  Detection stages are skipped; all data "
+             "files must already exist in data_dir.  The compound "
+             "data file defines both the drawn rectangle and the "
+             "crop region.",
+    )
     args = parser.parse_args()
 
     if not os.path.isdir(args.raw_dir):
@@ -565,6 +745,23 @@ def main() -> None:
         if not os.path.isfile(path):
             logger.error("%s ICC profile not found: %s", label, path)
             sys.exit(1)
+
+    if args.single_file is not None:
+        try:
+            run_single_file(
+                args.single_file,
+                args.raw_dir,
+                args.working_dir,
+                args.data_dir,
+                SCANNER_ICC,
+                WORKING_ICC,
+                args.preserve_drawings,
+            )
+        except RuntimeError as e:
+            logger.error("Single-file pipeline failed: %s", e)
+            sys.exit(1)
+        logger.info("Single-file pipeline complete: %s", args.single_file)
+        return
 
     stages = [
         (

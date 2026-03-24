@@ -1,7 +1,7 @@
 """
 Detect text bounding boxes for SKEW-prefixed TIFF images using PaddleOCR.
 
-For each SKEW-prefixed .tif/.tiff image under image_dir (recursively),
+For each SKEW-prefixed .tif/.tiff image in image_dir,
 runs PaddleOCR detection and writes a JSON file under data_dir containing
 the bounding box coordinates and scores.  Every image filename must start
 with the prefix "SKEW"; the script terminates immediately if any does not.
@@ -44,12 +44,11 @@ TIFF_EXTENSIONS = {".tif", ".tiff"}
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of TIFF file paths under *directory* (recursive)."""
+    """Return sorted list of TIFF file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in TIFF_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in TIFF_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
@@ -63,10 +62,10 @@ def verify_skew_prefix(images: list[str]) -> None:
             sys.exit(1)
 
 
-def build_output_path(image_path: str, image_root: str, data_root: str) -> str:
+def build_output_path(image_path: str, data_root: str) -> str:
     """Map an image path to its bounding box JSON file path under data_root."""
-    rel = os.path.relpath(image_path, image_root)
-    return os.path.join(data_root, rel + ".boxes.json")
+    filename = os.path.basename(image_path)
+    return os.path.join(data_root, filename + ".boxes.json")
 
 
 def to_temp_jpg(image_path: str) -> str:
@@ -176,7 +175,7 @@ def main() -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
-        out_path = build_output_path(image_path, args.image_dir, args.data_dir)
+        out_path = build_output_path(image_path, args.data_dir)
 
         try:
             boxes = detect_boxes(detector, image_path)
@@ -185,10 +184,9 @@ def main() -> None:
             failed.append((rel, str(e)))
             continue
 
-        os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(boxes, f, indent=2)
-        logger.info("[%d/%d] %s -- OK (%d box(es))", idx, total, rel, len(boxes))
+        logger.debug("[%d/%d] %s -- OK (%d box(es))", idx, total, rel, len(boxes))
 
     logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:

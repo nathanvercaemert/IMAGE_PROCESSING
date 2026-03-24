@@ -1,7 +1,7 @@
 """
 Draw compound bounding boxes on SKEW-prefixed images using pyvips.
 
-Walks image_dir recursively, reads the matching *.boxes.json file from
+Reads the matching *.boxes.json file for each image in image_dir from
 data_dir (created by detect_bounding_boxes_with_paddleocr.py), computes
 a single compound bounding rectangle around all detected text regions,
 adds a 100-pixel buffer, and draws a 30-pixel-wide black rectangle just
@@ -61,12 +61,11 @@ RECT_WIDTH_PX = 30
 
 
 def collect_images(directory: str) -> list[str]:
-    """Return sorted list of image file paths under *directory* (recursive)."""
+    """Return sorted list of image file paths in *directory*."""
     files = []
-    for dirpath, _dirnames, filenames in os.walk(directory):
-        for name in filenames:
-            if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
-                files.append(os.path.join(dirpath, name))
+    for name in os.listdir(directory):
+        if os.path.splitext(name)[1].lower() in IMAGE_EXTENSIONS:
+            files.append(os.path.join(directory, name))
     files.sort()
     return files
 
@@ -80,20 +79,16 @@ def verify_skew_prefix(images: list[str]) -> None:
             sys.exit(1)
 
 
-def build_boxes_data_path(
-    image_path: str, image_root: str, data_root: str,
-) -> str:
+def build_boxes_data_path(image_path: str, data_root: str) -> str:
     """Map an image path to its bounding box JSON file path under data_root."""
-    rel = os.path.relpath(image_path, image_root)
-    return os.path.join(data_root, rel + ".boxes.json")
+    filename = os.path.basename(image_path)
+    return os.path.join(data_root, filename + ".boxes.json")
 
 
-def build_compound_data_path(
-    image_path: str, image_root: str, data_root: str,
-) -> str:
+def build_compound_data_path(image_path: str, data_root: str) -> str:
     """Map an image path to its compound box data file path under data_root."""
-    rel = os.path.relpath(image_path, image_root)
-    return os.path.join(data_root, rel + ".compound.txt")
+    filename = os.path.basename(image_path)
+    return os.path.join(data_root, filename + ".compound.txt")
 
 
 def build_bound_path(image_path: str) -> str:
@@ -138,32 +133,26 @@ def make_solid(width: int, height: int, image: pyvips.Image) -> pyvips.Image:
     return patch
 
 
-def draw_compound_box(
-    image_path: str, output_path: str, boxes: list[dict],
-) -> tuple[int, int, int, int]:
-    """Draw a compound bounding rectangle on the image and save.
+def draw_rect_from_compound(
+    image: pyvips.Image,
+    output_path: str,
+    left: int,
+    top: int,
+    width: int,
+    height: int,
+) -> None:
+    """Draw a black rectangle around the crop region and save.
 
-    Returns the buffered crop region as (left, top, width, height),
-    clamped to image dimensions.
+    The inner edge of the rectangle coincides with the crop region
+    (left, top, width, height).  A RECT_WIDTH_PX-wide border is drawn
+    just outside it, clamped to the image bounds.
     """
-    logger.debug("Drawing compound box on '%s'", image_path)
-
-    image = pyvips.Image.new_from_file(image_path, access="sequential")
     w, h = image.width, image.height
 
-    min_x, min_y, max_x, max_y = compute_compound_box(boxes)
-
-    # Buffered compound box (the crop region)
-    crop_left = max(0, int(min_x) - BUFFER_PX)
-    crop_top = max(0, int(min_y) - BUFFER_PX)
-    crop_right = min(w, int(max_x) + BUFFER_PX)
-    crop_bottom = min(h, int(max_y) + BUFFER_PX)
-
-    # Inner edge of the rectangle = buffered compound box
-    inner_left = crop_left
-    inner_top = crop_top
-    inner_right = crop_right
-    inner_bottom = crop_bottom
+    inner_left = left
+    inner_top = top
+    inner_right = left + width
+    inner_bottom = top + height
 
     # Outer edge of the rectangle = inner edge + rect width
     outer_left = max(0, inner_left - RECT_WIDTH_PX)
@@ -204,8 +193,32 @@ def draw_compound_box(
     image.write_to_file(output_path)
     logger.debug("Saved '%s'", output_path)
 
+
+def draw_compound_box(
+    image_path: str, output_path: str, boxes: list[dict],
+) -> tuple[int, int, int, int]:
+    """Draw a compound bounding rectangle on the image and save.
+
+    Returns the buffered crop region as (left, top, width, height),
+    clamped to image dimensions.
+    """
+    logger.debug("Drawing compound box on '%s'", image_path)
+
+    image = pyvips.Image.new_from_file(image_path, access="sequential")
+    w, h = image.width, image.height
+
+    min_x, min_y, max_x, max_y = compute_compound_box(boxes)
+
+    # Buffered compound box (the crop region)
+    crop_left = max(0, int(min_x) - BUFFER_PX)
+    crop_top = max(0, int(min_y) - BUFFER_PX)
+    crop_right = min(w, int(max_x) + BUFFER_PX)
+    crop_bottom = min(h, int(max_y) + BUFFER_PX)
     crop_w = crop_right - crop_left
     crop_h = crop_bottom - crop_top
+
+    draw_rect_from_compound(image, output_path, crop_left, crop_top, crop_w, crop_h)
+
     return crop_left, crop_top, crop_w, crop_h
 
 
@@ -244,12 +257,8 @@ def main() -> None:
 
     for idx, image_path in enumerate(images, 1):
         rel = os.path.relpath(image_path, args.image_dir)
-        boxes_data_path = build_boxes_data_path(
-            image_path, args.image_dir, args.data_dir
-        )
-        compound_data_path = build_compound_data_path(
-            image_path, args.image_dir, args.data_dir
-        )
+        boxes_data_path = build_boxes_data_path(image_path, args.data_dir)
+        compound_data_path = build_compound_data_path(image_path, args.data_dir)
         bound_path = build_bound_path(image_path)
 
         try:
@@ -264,7 +273,6 @@ def main() -> None:
                 )
                 os.remove(image_path)
 
-                os.makedirs(os.path.dirname(compound_data_path), exist_ok=True)
                 with open(compound_data_path, "w", encoding="utf-8") as f:
                     f.write(f"{crop_left}\n{crop_top}\n{crop_w}\n{crop_h}\n")
 
@@ -277,7 +285,7 @@ def main() -> None:
             failed.append((rel, str(e)))
             continue
 
-        logger.info("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
+        logger.debug("[%d/%d] %s -- OK (%s)", idx, total, rel, action)
 
     logger.info("Processed %d/%d image(s) successfully.", total - len(failed), total)
     if failed:
