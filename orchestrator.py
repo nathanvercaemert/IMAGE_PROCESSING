@@ -510,13 +510,17 @@ def stage_crop(
 # ── Single-file pipeline ─────────────────────────────────────────────
 
 def _validate_single_file(
-    filename: str, raw_dir: str, data_dir: str,
-) -> tuple[str, str, str, str | None]:
+    filename: str, raw_dir: str, data_dir: str, mode: str,
+) -> str:
     """Validate inputs for single-file mode.
 
-    Returns (raw_path, orientation_path, skew_path, compound_path).
-    compound_path is None when no compound data file exists (meaning
-    no text was detected — the image passes through without cropping).
+    Checks that the RAW source file exists and that all data files
+    required by *mode* are present.  Returns the path to the RAW file.
+
+    Required data files per mode:
+        --rotate:  .orientation.txt (user-edited)
+        --deskew:  .orientation.txt, .skew.txt (user-edited)
+        --draw:    .orientation.txt, .skew.txt, .compound.txt (user-edited)
 
     Raises RuntimeError if any required file is missing.
     """
@@ -539,54 +543,46 @@ def _validate_single_file(
             f"orientation data not found: {orientation_path}"
         )
 
-    skew_path = os.path.join(data_dir, f"ROT{suffix}.skew.txt")
-    if not os.path.isfile(skew_path):
-        raise RuntimeError(f"skew data not found: {skew_path}")
+    if mode in ("deskew", "draw"):
+        skew_path = os.path.join(data_dir, f"ROT{suffix}.skew.txt")
+        if not os.path.isfile(skew_path):
+            raise RuntimeError(f"skew data not found: {skew_path}")
 
-    compound_path = os.path.join(
-        data_dir, f"SKEW{suffix}.compound.txt",
-    )
-    if not os.path.isfile(compound_path):
-        compound_path = None
+    if mode == "draw":
+        compound_path = os.path.join(
+            data_dir, f"SKEW{suffix}.compound.txt",
+        )
+        if not os.path.isfile(compound_path):
+            raise RuntimeError(
+                f"compound data not found: {compound_path}"
+            )
 
-    return raw_path, orientation_path, skew_path, compound_path
+    return raw_path
 
 
-def run_single_file(
-    filename: str,
-    raw_dir: str,
-    working_dir: str,
-    data_dir: str,
-    scanner_icc: str,
-    working_icc: str,
-    drawings_dir: str | None = None,
-) -> None:
-    """Process a single RAW file through the application stages.
-
-    Detection stages are skipped — all data files must already exist
-    in data_dir.
-    """
-    if not os.path.isdir(data_dir):
-        raise RuntimeError(f"data directory not found: {data_dir}")
-
-    raw_path, orientation_path, skew_path, compound_path = (
-        _validate_single_file(filename, raw_dir, data_dir)
-    )
-
-    os.makedirs(working_dir, exist_ok=True)
-
-    suffix = filename[3:]
-
-    # ── 1. ICC assign + convert ──────────────────────────────────
+def _apply_icc(
+    raw_path: str, working_dir: str, filename: str,
+    scanner_icc: str, working_icc: str,
+) -> str:
+    """ICC assign + convert.  Returns path to RAW file in working_dir."""
     working_raw = os.path.join(working_dir, filename)
     logger.info("ICC assign + convert: %s", filename)
     icc_mod.assign_convert_icc(
         raw_path, working_raw, scanner_icc, working_icc,
     )
+    return working_raw
 
-    # ── 2. Fix upside-down (RAW -> ROT) ─────────────────────────
+
+def _apply_rotation(
+    working_raw: str, working_dir: str,
+    filename: str, suffix: str, data_dir: str,
+) -> str:
+    """Apply rotation from orientation data.  Returns path to ROT file."""
     rot_name = "ROT" + suffix
     rot_path = os.path.join(working_dir, rot_name)
+    orientation_path = os.path.join(
+        data_dir, f"RAW{suffix}.orientation.txt",
+    )
     orientation = rotate_mod.read_orientation(orientation_path)
 
     if orientation == 180:
@@ -606,10 +602,18 @@ def run_single_file(
         os.rename(working_raw, rot_path)
         logger.info("Renamed (no rotation): %s -> %s", filename, rot_name)
 
-    # ── 3. Deskew (ROT -> SKEW) ─────────────────────────────────
+    return rot_path
+
+
+def _apply_deskew(
+    rot_path: str, working_dir: str, suffix: str, data_dir: str,
+) -> str:
+    """Apply deskew from skew data.  Returns path to SKEW file."""
+    rot_name = "ROT" + suffix
     skew_name = "SKEW" + suffix
     skew_image_path = os.path.join(working_dir, skew_name)
-    angle, confidence = deskew_mod.read_skew_data(skew_path)
+    skew_data_path = os.path.join(data_dir, f"ROT{suffix}.skew.txt")
+    angle, confidence = deskew_mod.read_skew_data(skew_data_path)
 
     if (
         abs(angle) < deskew_mod.MIN_ANGLE
@@ -628,52 +632,130 @@ def run_single_file(
             angle, confidence, rot_name, skew_name,
         )
 
-    # ── 4. Draw + crop (SKEW -> BOUND -> CROP) ──────────────────
+    return skew_image_path
+
+
+def _detect_skew(rot_path: str, suffix: str, data_dir: str) -> None:
+    """Run lept_skew on a ROT image and write .skew.txt."""
+    skew_out = os.path.join(data_dir, f"ROT{suffix}.skew.txt")
+    angle, confidence = skew_mod.detect_skew(rot_path)
+    with open(skew_out, "w", encoding="utf-8") as f:
+        f.write(f"{angle}\n{confidence}\n")
+    logger.info(
+        "Detected skew: angle=%.4f, confidence=%.4f -> %s",
+        angle, confidence, os.path.basename(skew_out),
+    )
+
+
+def _detect_and_draw(
+    skew_image_path: str, working_dir: str,
+    suffix: str, data_dir: str,
+) -> tuple[str, str | None]:
+    """Detect bounding boxes, compute compound box, draw, and write data.
+
+    Returns (bound_path, compound_path).  compound_path is None when
+    no text is detected.
+    """
+    skew_name = "SKEW" + suffix
     bound_name = "BOUND" + suffix
     bound_path = os.path.join(working_dir, bound_name)
 
-    if compound_path is None:
-        # No text detected — pass through without drawing or cropping.
+    # Detect bounding boxes.
+    detector = TextDetection(device="cpu", thresh=0.3, box_thresh=0.6)
+
+    root = logging.getLogger()
+    root.handlers.clear()
+    _configure_logging()
+
+    boxes = bbox_mod.detect_boxes(detector, skew_image_path)
+
+    boxes_out = os.path.join(data_dir, f"SKEW{suffix}.boxes.json")
+    with open(boxes_out, "w", encoding="utf-8") as f:
+        json.dump(boxes, f, indent=2)
+    logger.info(
+        "Detected %d bounding box(es) -> %s",
+        len(boxes), os.path.basename(boxes_out),
+    )
+
+    if not boxes:
         os.rename(skew_image_path, bound_path)
         logger.info(
-            "Renamed (no compound data): %s -> %s",
+            "Renamed (no bounding boxes detected): %s -> %s",
             skew_name, bound_name,
         )
-    else:
-        left, top, width, height = crop_mod.read_compound_data(
-            compound_path,
+        return bound_path, None
+
+    # Compute compound box, draw, and write compound data.
+    crop_left, crop_top, crop_w, crop_h = draw_mod.draw_compound_box(
+        skew_image_path, bound_path, boxes,
+    )
+    os.remove(skew_image_path)
+
+    compound_out = os.path.join(data_dir, f"SKEW{suffix}.compound.txt")
+    with open(compound_out, "w", encoding="utf-8") as f:
+        f.write(f"{crop_left}\n{crop_top}\n{crop_w}\n{crop_h}\n")
+    logger.info(
+        "Drew compound box around %d region(s), "
+        "crop=%d,%d %dx%d: %s -> %s",
+        len(boxes), crop_left, crop_top, crop_w, crop_h,
+        skew_name, bound_name,
+    )
+
+    return bound_path, compound_out
+
+
+def _draw_from_compound(
+    skew_image_path: str, working_dir: str,
+    suffix: str, data_dir: str,
+) -> tuple[str, str]:
+    """Draw rectangle from existing compound data.
+
+    Returns (bound_path, compound_path).
+    """
+    skew_name = "SKEW" + suffix
+    bound_name = "BOUND" + suffix
+    bound_path = os.path.join(working_dir, bound_name)
+    compound_path = os.path.join(data_dir, f"SKEW{suffix}.compound.txt")
+
+    left, top, width, height = crop_mod.read_compound_data(compound_path)
+
+    image = pyvips.Image.new_from_file(
+        skew_image_path, access="sequential",
+    )
+    img_w, img_h = image.width, image.height
+    if left + width > img_w or top + height > img_h:
+        raise RuntimeError(
+            f"compound coordinates ({left},{top} {width}x{height}) "
+            f"exceed image dimensions ({img_w}x{img_h})"
         )
 
-        image = pyvips.Image.new_from_file(
-            skew_image_path, access="sequential",
-        )
-        img_w, img_h = image.width, image.height
-        if left + width > img_w or top + height > img_h:
-            raise RuntimeError(
-                f"compound coordinates ({left},{top} {width}x{height}) "
-                f"exceed image dimensions ({img_w}x{img_h})"
-            )
+    draw_mod.draw_rect_from_compound(
+        image, bound_path, left, top, width, height,
+    )
+    os.remove(skew_image_path)
+    logger.info(
+        "Drew compound rect %d,%d %dx%d: %s -> %s",
+        left, top, width, height, skew_name, bound_name,
+    )
 
-        draw_mod.draw_rect_from_compound(
-            image, bound_path, left, top, width, height,
-        )
-        os.remove(skew_image_path)
-        logger.info(
-            "Drew compound rect %d,%d %dx%d: %s -> %s",
-            left, top, width, height, skew_name, bound_name,
-        )
+    return bound_path, compound_path
 
-    # Preserve drawing if requested.
+
+def _save_and_crop(
+    bound_path: str, working_dir: str, suffix: str,
+    compound_path: str | None, drawings_dir: str | None,
+) -> None:
+    """Optionally save a drawing copy, then crop BOUND -> CROP."""
+    bound_name = "BOUND" + suffix
+    crop_name = "CROP" + suffix
+    crop_path = os.path.join(working_dir, crop_name)
+
     if drawings_dir is not None:
         os.makedirs(drawings_dir, exist_ok=True)
         draw_dest_name = "DRAW" + suffix
         draw_dest = os.path.join(drawings_dir, draw_dest_name)
         _save_drawing(bound_path, draw_dest)
         logger.info("Saved drawing: %s", draw_dest_name)
-
-    # Crop.
-    crop_name = "CROP" + suffix
-    crop_path = os.path.join(working_dir, crop_name)
 
     if compound_path is None:
         os.rename(bound_path, crop_path)
@@ -692,6 +774,80 @@ def run_single_file(
             "Cropped to %d,%d %dx%d: %s -> %s",
             left, top, width, height, bound_name, crop_name,
         )
+
+
+def run_single_file(
+    filename: str,
+    raw_dir: str,
+    working_dir: str,
+    data_dir: str,
+    scanner_icc: str,
+    working_icc: str,
+    mode: str,
+    drawings_dir: str | None = None,
+) -> None:
+    """Reprocess a single RAW file after a manual data-file edit.
+
+    *mode* determines the re-entry point:
+
+    ``rotate``
+        The user edited ``.orientation.txt``.  Rotation is applied from
+        the edited file; skew, bounding boxes, and compound data are
+        re-detected fresh.
+
+    ``deskew``
+        The user edited ``.skew.txt``.  Rotation and deskew are applied
+        from existing data; bounding boxes and compound data are
+        re-detected fresh.
+
+    ``draw``
+        The user edited ``.compound.txt``.  Rotation and deskew are
+        applied from existing data; the edited compound data is used
+        directly for drawing and cropping.  Bounding box data is
+        ignored.
+    """
+    if not os.path.isdir(data_dir):
+        raise RuntimeError(f"data directory not found: {data_dir}")
+
+    raw_path = _validate_single_file(filename, raw_dir, data_dir, mode)
+
+    os.makedirs(working_dir, exist_ok=True)
+    os.makedirs(data_dir, exist_ok=True)
+
+    suffix = filename[3:]
+
+    # ── 1. ICC assign + convert (always) ─────────────────────────
+    working_raw = _apply_icc(
+        raw_path, working_dir, filename, scanner_icc, working_icc,
+    )
+
+    # ── 2. Apply rotation (always) ───────────────────────────────
+    rot_path = _apply_rotation(
+        working_raw, working_dir, filename, suffix, data_dir,
+    )
+
+    # ── 3. Skew detection + deskew ───────────────────────────────
+    if mode == "rotate":
+        _detect_skew(rot_path, suffix, data_dir)
+
+    skew_image_path = _apply_deskew(
+        rot_path, working_dir, suffix, data_dir,
+    )
+
+    # ── 4. Bounding box detection + draw, or draw from compound ──
+    if mode in ("rotate", "deskew"):
+        bound_path, compound_path = _detect_and_draw(
+            skew_image_path, working_dir, suffix, data_dir,
+        )
+    else:
+        bound_path, compound_path = _draw_from_compound(
+            skew_image_path, working_dir, suffix, data_dir,
+        )
+
+    # ── 5. Save drawing + crop ───────────────────────────────────
+    _save_and_crop(
+        bound_path, working_dir, suffix, compound_path, drawings_dir,
+    )
 
 
 # ── Main ─────────────────────────────────────────────────────────────
@@ -729,11 +885,34 @@ def main() -> None:
         "--single-file",
         metavar="FILENAME",
         default=None,
-        help="Process a single RAW-prefixed file instead of the "
-             "full batch.  Detection stages are skipped; all data "
-             "files must already exist in data_dir.  The compound "
-             "data file defines both the drawn rectangle and the "
-             "crop region.",
+        help="Reprocess a single RAW-prefixed file.  Must be "
+             "combined with exactly one of --rotate, --deskew, "
+             "or --draw to specify which data file was edited.",
+    )
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "--rotate",
+        action="store_true",
+        default=False,
+        help="Single-file mode: reprocess after editing "
+             ".orientation.txt.  Re-detects skew, bounding boxes, "
+             "and compound data.",
+    )
+    mode_group.add_argument(
+        "--deskew",
+        action="store_true",
+        default=False,
+        help="Single-file mode: reprocess after editing "
+             ".skew.txt.  Re-detects bounding boxes and compound "
+             "data.",
+    )
+    mode_group.add_argument(
+        "--draw",
+        action="store_true",
+        default=False,
+        help="Single-file mode: reprocess after editing "
+             ".compound.txt.  Uses edited compound data directly; "
+             "bounding box data is ignored.",
     )
     args = parser.parse_args()
 
@@ -746,7 +925,15 @@ def main() -> None:
             logger.error("%s ICC profile not found: %s", label, path)
             sys.exit(1)
 
+    has_mode = args.rotate or args.deskew or args.draw
     if args.single_file is not None:
+        if not has_mode:
+            logger.error(
+                "--single-file requires one of --rotate, --deskew, or --draw"
+            )
+            sys.exit(1)
+
+        mode = "rotate" if args.rotate else "deskew" if args.deskew else "draw"
         try:
             run_single_file(
                 args.single_file,
@@ -755,6 +942,7 @@ def main() -> None:
                 args.data_dir,
                 SCANNER_ICC,
                 WORKING_ICC,
+                mode,
                 args.preserve_drawings,
             )
         except RuntimeError as e:
@@ -762,6 +950,12 @@ def main() -> None:
             sys.exit(1)
         logger.info("Single-file pipeline complete: %s", args.single_file)
         return
+
+    if has_mode:
+        logger.error(
+            "--rotate, --deskew, and --draw require --single-file"
+        )
+        sys.exit(1)
 
     stages = [
         (

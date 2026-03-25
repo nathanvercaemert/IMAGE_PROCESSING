@@ -34,21 +34,54 @@ docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_
 
 ### Single-file reprocessing
 
-To reprocess a single image using existing data files (e.g. after manually editing orientation, skew, or compound crop coordinates), add `--single-file`. Detection stages are skipped entirely; all data files must already exist in `DATA/`. The compound data file defines both the drawn rectangle and the crop region.
+Reprocess a single image after manually editing one of its data files. Use `--single-file` with exactly one of `--rotate`, `--deskew`, or `--draw` to specify which data file was edited. All stages before the edit point are replayed deterministically from existing data. All stages after the edit point are re-detected fresh (except `--draw`, which uses the edited compound data directly).
+
+#### `--rotate`
+
+Use after editing `.orientation.txt`. Re-detects skew, bounding boxes, and compound data.
 
 ```bash
-docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --single-file RAW_0001.tif
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --single-file RAW_0001.tif --rotate
 ```
 
-Required data files for a given `RAW_0001.tif`:
-- `DATA/RAW_0001.tif.orientation.txt` — orientation (0 or 180)
-- `DATA/ROT_0001.tif.skew.txt` — skew angle and confidence
-- `DATA/SKEW_0001.tif.compound.txt` — crop coordinates (optional; if absent, no drawing or crop is applied)
+Required data files:
+- `DATA/RAW_0001.tif.orientation.txt` — orientation (user-edited)
 
-Can be combined with `--preserve-drawings`:
+Overwrites: `.skew.txt`, `.boxes.json`, `.compound.txt`
+
+#### `--deskew`
+
+Use after editing `.skew.txt`. Re-detects bounding boxes and compound data.
 
 ```bash
-docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --single-file RAW_0001.tif --preserve-drawings /data/DRAWINGS
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --single-file RAW_0001.tif --deskew
+```
+
+Required data files:
+- `DATA/RAW_0001.tif.orientation.txt` — orientation
+- `DATA/ROT_0001.tif.skew.txt` — skew angle and confidence (user-edited)
+
+Overwrites: `.boxes.json`, `.compound.txt`
+
+#### `--draw`
+
+Use after editing `.compound.txt`. Bounding box data is ignored. The edited compound data defines both the drawn rectangle and the crop region.
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --single-file RAW_0001.tif --draw
+```
+
+Required data files:
+- `DATA/RAW_0001.tif.orientation.txt` — orientation
+- `DATA/ROT_0001.tif.skew.txt` — skew angle and confidence
+- `DATA/SKEW_0001.tif.compound.txt` — crop coordinates (user-edited)
+
+#### Combining with `--preserve-drawings`
+
+All three modes can be combined with `--preserve-drawings`:
+
+```bash
+docker run -v "/mnt/c/Users/natha/OneDrive/Desktop/TEST_IMAGE_PROCESSING/DOCKER_TEST:/data" image-processing /data/RAW /data/WORKING /data/DATA --single-file RAW_0001.tif --deskew --preserve-drawings /data/DRAWINGS
 ```
 
 ## Cleanup
